@@ -25,27 +25,15 @@ jobs:
           distribution: 'temurin'
           cache: maven
 
-      # 3. Compile
-      - name: Compile
-        run: mvn clean compile
+      # 3. Compile, Test, and Verify Coverage (all in one)
+      - name: Build, Test, and Verify Coverage
+        run: mvn clean verify
 
-      # 4. Run tests with Surefire
-      - name: Run Tests (Surefire)
-        run: mvn test
-
-      # 5. Verify JaCoCo coverage (90% threshold)
-      - name: Verify Code Coverage (90% threshold)
-        run: mvn jacoco:check
-
-      # 6. Check code formatting (Spotless)
+      # 4. Check code formatting (Spotless)
       - name: Check Code Formatting (Spotless)
         run: mvn spotless:check
 
-      # 7. Generate coverage report
-      - name: Generate JaCoCo Coverage Report
-        run: mvn jacoco:report
-
-      # 8. Upload coverage to artifacts (optional, for visibility)
+      # 5. Upload coverage to artifacts (optional, for visibility)
       - name: Upload Coverage Report
         if: always()
         uses: actions/upload-artifact@v7
@@ -53,7 +41,7 @@ jobs:
           name: jacoco-coverage-report
           path: target/site/jacoco/
 
-      # 9. Upload coverage to Codecov (auto-updates badge)
+      # 6. Upload coverage to Codecov (auto-updates badge)
       - name: Upload Coverage to Codecov
         uses: codecov/codecov-action@v7
         with:
@@ -63,7 +51,7 @@ jobs:
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
 
-      # 10. Comment on PR with coverage info (if PR)
+      # 7. Comment on PR with coverage info (if PR)
       - name: Post Coverage Summary to PR
         if: github.event_name == 'pull_request'
         run: |
