@@ -1,7 +1,6 @@
 # Write-Ahead Log (WAL) — A Durable, Batched Persistence System
 
 [![codecov](https://codecov.io/github/archdemon-developer/write-ahead-log/graph/badge.svg?token=68IURPEYKH)](https://codecov.io/github/archdemon-developer/write-ahead-log)
-[![Tests](https://github.com/archdemon-developer/write-ahead-log/actions/workflows/ci.yml/badge.svg)](https://github.com/archdemon-developer/write-ahead-log/actions)
 
 ## Overview
 
