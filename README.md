@@ -214,7 +214,7 @@ This project prioritizes **correctness and understanding** over features:
 
 ## 📚 References
 
-- 📖 **Durability**: Jim Gray's "The Five-Minute Rule" on disk I/O costs
+- 📖 **Durability**: Jim Gray's "The Five-Minute Rule" on disk I/O cost
 - 💼 **Real Examples**:
     - 🏗️ RocksDB uses level-based WAL with snapshots
     - 🔗 Raft uses entries + snapshots for consensus durability
