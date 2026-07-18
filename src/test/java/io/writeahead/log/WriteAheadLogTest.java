@@ -1,192 +1,359 @@
 package io.writeahead.log;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.*;
 
 import io.writeahead.log.models.LogEntry;
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Paths;
+import java.nio.file.Path;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 public class WriteAheadLogTest {
 
-  private final String LOG_PATH = "test-wal.log";
+  @TempDir Path tempDir;
+
+  private String logPath;
 
   @BeforeEach
-  public void setUp() throws IOException {
-    Files.deleteIfExists(Paths.get(LOG_PATH));
+  void setUp() {
+    logPath = tempDir.toString();
   }
 
   @Test
-  public void testNormalAppendAndRead() throws IOException {
-    System.out.println("Test: Normal Append and Read");
-    WriteAheadLog wal = new WriteAheadLog(10, LOG_PATH);
+  void testAppendBelowBatchSize() throws IOException {
+    WriteAheadLog wal = new WriteAheadLog(10, logPath);
 
+    // Append 5 entries (less than batch size of 10)
     for (int i = 0; i < 5; i++) {
       byte[] data = ("entry-" + i).getBytes();
       wal.append(new LogEntry(data.length, data, System.currentTimeMillis()));
     }
 
-    List<LogEntry> bufferEntries = wal.readBuffer();
-    System.out.println("  Buffer entries: " + bufferEntries.size());
-    assert bufferEntries.size() == 5 : "Expected 5 entries in buffer";
+    // Entries should be in buffer, not on disk
+    assertEquals(5, wal.readBuffer().size(), "Buffer should have 5 entries");
+    assertTrue(wal.readFromDisk().isEmpty(), "Disk should be empty (batch not full)");
 
-    List<LogEntry> diskEntries = wal.readFromDisk();
-    System.out.println("  Disk entries: " + diskEntries.size());
-    assertTrue(diskEntries.isEmpty(), "Expected 0 entries on disk (batch not full)");
     wal.close();
-    System.out.println("  ✅ Test passed\n");
   }
 
   @Test
-  public void testBatchingBehavior() throws IOException {
-    System.out.println("Test: Batching Behavior (batch size = 10)");
+  void testBatchFlushAtThreshold() throws IOException {
+    WriteAheadLog wal = new WriteAheadLog(10, logPath);
 
-    WriteAheadLog wal = new WriteAheadLog(10, LOG_PATH);
-
+    // Append 9 entries (below threshold)
     for (int i = 0; i < 9; i++) {
       byte[] data = ("entry-" + i).getBytes();
       wal.append(new LogEntry(data.length, data, System.currentTimeMillis()));
     }
 
-    System.out.println("  After 9 appends:");
-    System.out.println("    Buffer: " + wal.readBuffer().size() + " (expected 9)");
-    System.out.println("    Disk: " + wal.readFromDisk().size() + " (expected 0)");
-    assertEquals(9, wal.readBuffer().size());
-    assertTrue(wal.readFromDisk().isEmpty());
+    assertEquals(9, wal.readBuffer().size(), "Buffer should have 9 entries");
+    assertTrue(wal.readFromDisk().isEmpty(), "Disk should be empty");
 
-    byte[] data = ("entry-9").getBytes();
+    // Append 10th entry (triggers flush)
+    byte[] data = "entry-9".getBytes();
     wal.append(new LogEntry(data.length, data, System.currentTimeMillis()));
 
-    System.out.println("  After 10th append (batch full):");
-    System.out.println("    Buffer: " + wal.readBuffer().size() + " (expected 0)");
-    System.out.println("    Disk: " + wal.readFromDisk().size() + " (expected 10)");
-    assertTrue(wal.readBuffer().isEmpty(), "Batch should be cleared after flush");
-    assertEquals(10, wal.readFromDisk().size(), "10 entries should be on disk");
+    assertTrue(wal.readBuffer().isEmpty(), "Buffer should be cleared after flush");
+    assertEquals(10, wal.readFromDisk().size(), "Disk should have 10 entries");
 
     wal.close();
-    System.out.println("  ✅ Test passed\n");
   }
 
   @Test
-  public void testMultipleOperations() throws IOException {
-    System.out.println("Test: Multiple Operations in One Session");
+  void testMultipleBatches() throws IOException {
+    WriteAheadLog wal = new WriteAheadLog(5, logPath);
 
-    WriteAheadLog wal = new WriteAheadLog(10, LOG_PATH);
-
-    System.out.println("  Appending 7 entries...");
-    for (int i = 0; i < 7; i++) {
-      byte[] data = ("batch1-" + i).getBytes();
+    // Write 3 full batches (15 entries)
+    for (int i = 0; i < 15; i++) {
+      byte[] data = ("entry-" + i).getBytes();
       wal.append(new LogEntry(data.length, data, System.currentTimeMillis()));
     }
-    System.out.println(
-        "    Buffer: " + wal.readBuffer().size() + ", Disk: " + wal.readFromDisk().size());
 
-    System.out.println("  Appending 5 more entries (triggers batch)...");
-    for (int i = 0; i < 5; i++) {
-      byte[] data = ("batch2-" + i).getBytes();
-      wal.append(new LogEntry(data.length, data, System.currentTimeMillis()));
-    }
-    System.out.println(
-        "    Buffer: " + wal.readBuffer().size() + ", Disk: " + wal.readFromDisk().size());
-
-    System.out.println("  Appending 3 more entries...");
-    for (int i = 0; i < 3; i++) {
-      byte[] data = ("batch3-" + i).getBytes();
-      wal.append(new LogEntry(data.length, data, System.currentTimeMillis()));
-    }
-    System.out.println(
-        "    Buffer: " + wal.readBuffer().size() + ", Disk: " + wal.readFromDisk().size());
-
-    System.out.println("  ReadAll: " + wal.readAll().size() + " total entries");
-    assertEquals(15, wal.readAll().size(), "Should see 15 total entries");
+    assertEquals(15, wal.readFromDisk().size(), "Should have 15 entries on disk (3 batches)");
+    assertTrue(wal.readBuffer().isEmpty(), "Buffer should be empty after 3 full batches");
 
     wal.close();
-    System.out.println("  ✅ Test passed\n");
   }
 
   @Test
-  public void testCloseFlushesRemainingBatch() throws IOException {
-    System.out.println("Test: Close Flushes Remaining Batch");
+  void testReadBuffer() throws IOException {
+    WriteAheadLog wal = new WriteAheadLog(10, logPath);
 
+    List<LogEntry> entries =
+        List.of(
+            new LogEntry("entry-1".getBytes().length, "entry-1".getBytes(), 1000),
+            new LogEntry("entry-2".getBytes().length, "entry-2".getBytes(), 2000),
+            new LogEntry("entry-3".getBytes().length, "entry-3".getBytes(), 3000));
+
+    for (LogEntry entry : entries) {
+      wal.append(entry);
+    }
+
+    List<LogEntry> buffered = wal.readBuffer();
+    assertEquals(3, buffered.size(), "Buffer should have 3 entries");
+    assertEquals("entry-1", new String(buffered.getFirst().data()));
+
+    wal.close();
+  }
+
+  @Test
+  void testReadFromDisk() throws IOException {
+    WriteAheadLog wal = new WriteAheadLog(5, logPath);
+
+    // Write 10 entries (2 batches)
+    for (int i = 0; i < 10; i++) {
+      byte[] data = ("entry-" + i).getBytes();
+      wal.append(new LogEntry(data.length, data, System.currentTimeMillis()));
+    }
+
+    List<LogEntry> fromDisk = wal.readFromDisk();
+    assertEquals(10, fromDisk.size(), "Should read all persisted entries");
+
+    wal.close();
+  }
+
+  @Test
+  void testReadAll() throws IOException {
+    WriteAheadLog wal = new WriteAheadLog(10, logPath);
+
+    // Write 15 entries (1 batch flushed + 5 in buffer)
+    for (int i = 0; i < 15; i++) {
+      byte[] data = ("entry-" + i).getBytes();
+      wal.append(new LogEntry(data.length, data, System.currentTimeMillis()));
+    }
+
+    List<LogEntry> all = wal.readAll();
+    assertEquals(15, all.size(), "Should return disk + buffer entries");
+
+    // Verify order: disk entries first, then buffer
+    assertEquals("entry-0", new String(all.getFirst().data()));
+    assertEquals("entry-14", new String(all.get(14).data()));
+
+    wal.close();
+  }
+
+  @Test
+  void testCloseFlushesRemainingBatch() throws IOException {
+    // Session 1: Write and close (should flush remaining)
     {
-      WriteAheadLog wal = new WriteAheadLog(10, LOG_PATH);
+      WriteAheadLog wal = new WriteAheadLog(10, logPath);
+
+      // Write 15 entries (1 batch flushed + 5 remaining)
       for (int i = 0; i < 15; i++) {
         byte[] data = ("entry-" + i).getBytes();
         wal.append(new LogEntry(data.length, data, System.currentTimeMillis()));
       }
-      System.out.println("  Session 1: Wrote 15 entries");
-      System.out.println(
-          "    Before close - Buffer: "
-              + wal.readBuffer().size()
-              + ", Disk: "
-              + wal.readFromDisk().size());
 
+      assertEquals(5, wal.readBuffer().size(), "Buffer should have 5 remaining entries");
       wal.close(); // Should flush remaining 5
-      System.out.println("    After close - all entries should be on disk");
     }
 
+    // Session 2: Recover and verify
     {
-      WriteAheadLog wal = new WriteAheadLog(10, LOG_PATH);
+      WriteAheadLog wal = new WriteAheadLog(10, logPath);
       List<LogEntry> recovered = wal.readFromDisk();
-      System.out.println("  Session 2: Recovered " + recovered.size() + " entries (expected 15)");
-      assertEquals(15, recovered.size(), "All 15 entries should survive clean close");
+
+      assertEquals(15, recovered.size(), "All 15 entries should survive close");
+      assertEquals("entry-0", new String(recovered.getFirst().data()));
+      assertEquals("entry-14", new String(recovered.get(14).data()));
+
       wal.close();
     }
-
-    System.out.println("  ✅ Test passed\n");
   }
 
   @Test
-  public void testCrashRecovery() throws IOException {
-    System.out.println("Test: Crash Recovery (write 12, recover 10)");
-
+  void testCrashRecovery() throws IOException {
+    // Session 1: Write 12 entries without closing (simulate crash)
     {
-      WriteAheadLog wal = new WriteAheadLog(10, LOG_PATH);
+      WriteAheadLog wal = new WriteAheadLog(10, logPath);
+
       for (int i = 0; i < 12; i++) {
         byte[] data = ("entry-" + i).getBytes();
         wal.append(new LogEntry(data.length, data, System.currentTimeMillis()));
       }
+
       // DON'T close - simulate crash
-      System.out.println("  Session 1: Wrote 12 entries (10 flushed, 2 in buffer)");
-      System.out.println("  Simulating crash - not calling close()");
+      // 10 entries flushed to disk, 2 in buffer (lost)
     }
 
+    // Session 2: Recover from crash
     {
-      WriteAheadLog wal = new WriteAheadLog(10, LOG_PATH);
+      WriteAheadLog wal = new WriteAheadLog(10, logPath);
+
       List<LogEntry> recovered = wal.readFromDisk();
-      System.out.println("  Session 2: Recovered from disk: " + recovered.size() + " entries");
-      assertEquals(10, recovered.size(), "Should recover exactly 10 entries (batch size)");
+      assertEquals(10, recovered.size(), "Should recover only flushed entries");
 
       List<LogEntry> all = wal.readAll();
-      System.out.println("  All entries (disk + buffer): " + all.size());
-      assertEquals(10, all.size(), "Should see only 10 (2 were lost in crash)");
+      assertEquals(10, all.size(), "Total should be 10 (2 lost entries in buffer)");
 
       wal.close();
     }
-
-    System.out.println("  ✅ Test passed\n");
   }
 
   @Test
-  void testReadBufferWithMixedState() throws IOException {
-    WriteAheadLog wal = new WriteAheadLog(10, LOG_PATH);
-    for (int i = 0; i < 10; i++) {
-      byte[] data = ("entry-flush-" + i).getBytes();
-      wal.append(new LogEntry(data.length, data, System.currentTimeMillis()));
+  void testReadAllAfterTimestamp() throws IOException {
+    WriteAheadLog wal = new WriteAheadLog(20, logPath);
+
+    // Write entries with specific timestamps
+    List<LogEntry> entries =
+        List.of(
+            new LogEntry("entry-1".getBytes().length, "entry-1".getBytes(), 1000),
+            new LogEntry("entry-2".getBytes().length, "entry-2".getBytes(), 2000),
+            new LogEntry("entry-3".getBytes().length, "entry-3".getBytes(), 3000),
+            new LogEntry("entry-4".getBytes().length, "entry-4".getBytes(), 4000),
+            new LogEntry("entry-5".getBytes().length, "entry-5".getBytes(), 5000));
+
+    for (LogEntry entry : entries) {
+      wal.append(entry);
     }
 
-    for (int i = 0; i < 3; i++) {
-      byte[] data = ("entry-buffer-" + i).getBytes();
-      wal.append(new LogEntry(data.length, data, System.currentTimeMillis()));
+    wal.close();
+
+    // Reopen and query
+    WriteAheadLog wal2 = new WriteAheadLog(20, logPath);
+    List<LogEntry> afterTimestamp = wal2.readAllAfterTimestamp(2500);
+
+    assertEquals(3, afterTimestamp.size(), "Should return 3 entries after timestamp 2500");
+    assertEquals("entry-3", new String(afterTimestamp.get(0).data()));
+    assertEquals("entry-5", new String(afterTimestamp.get(2).data()));
+
+    wal2.close();
+  }
+
+  @Test
+  void testTruncateBeforeTimestamp() throws IOException {
+    WriteAheadLog wal = new WriteAheadLog(1, logPath);
+
+    byte[] largeData = new byte[5 * 1024 * 1024];
+
+    List<LogEntry> entries =
+        List.of(
+            new LogEntry(largeData.length, largeData, 1000),
+            new LogEntry(largeData.length, largeData, 2000),
+            new LogEntry(largeData.length, largeData, 3000));
+
+    for (LogEntry entry : entries) {
+      wal.append(entry);
     }
 
-    assertEquals(3, wal.readBuffer().size(), "Buffer should have 3 entries");
-    assertEquals(10, wal.readFromDisk().size(), "Disk should have 10 entries");
-    assertEquals(13, wal.readAll().size(), "Total should be 13 (10 disk + 3 buffer)");
+    wal.close();
+
+    // Truncate before 2500 - this removes Segment 1 (maxTs=2000)
+    WriteAheadLog wal2 = new WriteAheadLog(1, logPath);
+    wal2.truncateBeforeTimestamp(2500);
+    wal2.close();
+
+    // Verify only Segment 2+ remain
+    WriteAheadLog wal3 = new WriteAheadLog(1, logPath);
+    List<LogEntry> remaining = wal3.readFromDisk();
+
+    assertTrue(remaining.size() < 3, "Should have fewer entries after truncation");
+
+    wal3.close();
+  }
+
+  @Test
+  void testImmutabilityOfReturnedLists() throws IOException {
+    WriteAheadLog wal = new WriteAheadLog(10, logPath);
+
+    byte[] data = "entry-1".getBytes();
+    wal.append(new LogEntry(data.length, data, 1000));
+
+    List<LogEntry> buffer = wal.readBuffer();
+    assertThrows(
+        UnsupportedOperationException.class,
+        () -> buffer.add(new LogEntry(0, new byte[0], 0)),
+        "Returned list should be immutable");
+
+    wal.close();
+  }
+
+  @Test
+  void testMultipleSessionsPreserveData() throws IOException {
+    // Session 1
+    {
+      WriteAheadLog wal = new WriteAheadLog(5, logPath);
+      for (int i = 0; i < 7; i++) {
+        byte[] data = ("session1-entry-" + i).getBytes();
+        wal.append(new LogEntry(data.length, data, 1000 + i));
+      }
+      wal.close();
+    }
+
+    // Session 2
+    {
+      WriteAheadLog wal = new WriteAheadLog(5, logPath);
+      for (int i = 0; i < 8; i++) {
+        byte[] data = ("session2-entry-" + i).getBytes();
+        wal.append(new LogEntry(data.length, data, 2000 + i));
+      }
+      wal.close();
+    }
+
+    // Session 3: Verify all data
+    {
+      WriteAheadLog wal = new WriteAheadLog(5, logPath);
+      List<LogEntry> all = wal.readFromDisk();
+
+      assertEquals(15, all.size(), "Should have entries from both sessions");
+      assertEquals("session1-entry-0", new String(all.getFirst().data()));
+      assertEquals("session2-entry-7", new String(all.get(14).data()));
+
+      wal.close();
+    }
+  }
+
+  @Test
+  void testEmptyWalOnCreation() throws IOException {
+    WriteAheadLog wal = new WriteAheadLog(10, logPath);
+
+    assertTrue(wal.readBuffer().isEmpty(), "Buffer should be empty on creation");
+    assertTrue(wal.readFromDisk().isEmpty(), "Disk should be empty on creation");
+    assertTrue(wal.readAll().isEmpty(), "Total should be empty on creation");
+
+    wal.close();
+  }
+
+  @Test
+  void testLargeEntries() throws IOException {
+    WriteAheadLog wal = new WriteAheadLog(3, logPath);
+
+    // Create large entries (1MB each)
+    byte[] largeData = new byte[1024 * 1024];
+    for (int i = 0; i < largeData.length; i++) {
+      largeData[i] = (byte) (i % 256);
+    }
+
+    List<LogEntry> entries =
+        List.of(
+            new LogEntry(largeData.length, largeData, 1000),
+            new LogEntry(largeData.length, largeData, 2000),
+            new LogEntry(largeData.length, largeData, 3000));
+
+    for (LogEntry entry : entries) {
+      wal.append(entry);
+    }
+
+    List<LogEntry> recovered = wal.readFromDisk();
+    assertEquals(3, recovered.size(), "Should handle large entries");
+
+    wal.close();
+  }
+
+  @Test
+  void testReadMethodAliases() throws IOException {
+    WriteAheadLog wal = new WriteAheadLog(10, logPath);
+
+    byte[] data = "entry-1".getBytes();
+    wal.append(new LogEntry(data.length, data, 1000));
+
+    // read() and readBuffer() should be equivalent for buffered entries
+    List<LogEntry> read = wal.read();
+    List<LogEntry> buffer = wal.readBuffer();
+
+    assertEquals(read.size(), buffer.size(), "read() and readBuffer() should match");
 
     wal.close();
   }

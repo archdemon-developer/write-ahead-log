@@ -2,7 +2,6 @@ package io.writeahead.log;
 
 import io.writeahead.log.models.LogEntry;
 import io.writeahead.log.segments.SegmentManager;
-
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;

@@ -79,6 +79,7 @@ public class MetadataParser {
     int end = json.indexOf(",", start);
     if (end == -1) end = json.indexOf("}", start);
     String numStr = json.substring(start, end).trim();
+    numStr = numStr.split("\\s+")[0];
     return Long.parseLong(numStr);
   }
 }
