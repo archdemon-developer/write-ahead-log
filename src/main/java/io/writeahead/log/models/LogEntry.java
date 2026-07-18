@@ -1,6 +1,5 @@
 package io.writeahead.log.models;
 
-
 public record LogEntry(int size, byte[] data, long timestamp) {
 
   public LogEntry(int size, byte[] data, long timestamp) {
@@ -13,7 +12,6 @@ public record LogEntry(int size, byte[] data, long timestamp) {
   public int size() {
     return size;
   }
-
 
   @Override
   public byte[] data() {

@@ -46,7 +46,6 @@ public class WriteAheadLog {
     return Collections.unmodifiableList(batch);
   }
 
-
   public void close() throws IOException {
     if (!batch.isEmpty()) {
       fileUtils2.writeAll(batch);

@@ -57,8 +57,8 @@ public class FileUtils2 {
 
   public List<LogEntry> readAllAfterTimestamp(long timestamp) throws IOException {
     List<LogEntry> entriesAfter = new ArrayList<>();
-    for(LogEntry logEntry : readAll()) {
-      if(logEntry.timestamp() > timestamp) {
+    for (LogEntry logEntry : readAll()) {
+      if (logEntry.timestamp() > timestamp) {
         entriesAfter.add(logEntry);
       }
     }
