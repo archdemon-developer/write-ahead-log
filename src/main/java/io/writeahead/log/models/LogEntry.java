@@ -1,19 +1,27 @@
 package io.writeahead.log.models;
 
-public class LogEntry {
-  private final int size;
-  private final byte[] data;
 
-  public LogEntry(int size, byte[] data) {
+public record LogEntry(int size, byte[] data, long timestamp) {
+
+  public LogEntry(int size, byte[] data, long timestamp) {
     this.size = size;
-    this.data = data;
+    this.data = data.clone();
+    this.timestamp = timestamp;
   }
 
-  public int getSize() {
+  @Override
+  public int size() {
     return size;
   }
 
-  public byte[] getData() {
-    return data;
+
+  @Override
+  public byte[] data() {
+    return data.clone();
+  }
+
+  @Override
+  public long timestamp() {
+    return timestamp;
   }
 }

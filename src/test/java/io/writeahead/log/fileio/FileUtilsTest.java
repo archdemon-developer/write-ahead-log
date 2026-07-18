@@ -21,19 +21,19 @@ public class FileUtilsTest {
 
   @Test
   void testWriteSingleBypassesBatchAndPersists() throws IOException {
-    FileUtils fileUtils = new FileUtils(TEST_LOG_PATH);
+    FileUtils2 fileUtils2 = new FileUtils2(TEST_LOG_PATH);
 
     byte[] data = "single-entry".getBytes();
-    LogEntry entry = new LogEntry(data.length, data);
-    fileUtils.writeSingle(entry);
+    LogEntry entry = new LogEntry(data.length, data, System.currentTimeMillis());
+    fileUtils2.writeSingle(entry);
 
-    fileUtils.close();
-    fileUtils = new FileUtils(TEST_LOG_PATH);
+    fileUtils2.close();
+    fileUtils2 = new FileUtils2(TEST_LOG_PATH);
 
-    List<LogEntry> entries = fileUtils.readAll();
+    List<LogEntry> entries = fileUtils2.readAll();
     assertEquals(1, entries.size(), "Should have 1 entry");
-    assertEquals(data.length, entries.getFirst().getSize(), "Entry size should match");
+    assertEquals(data.length, entries.getFirst().size(), "Entry size should match");
 
-    fileUtils.close();
+    fileUtils2.close();
   }
 }

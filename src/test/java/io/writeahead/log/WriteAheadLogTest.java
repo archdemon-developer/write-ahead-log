@@ -27,7 +27,7 @@ public class WriteAheadLogTest {
 
     for (int i = 0; i < 5; i++) {
       byte[] data = ("entry-" + i).getBytes();
-      wal.append(new LogEntry(data.length, data));
+      wal.append(new LogEntry(data.length, data, System.currentTimeMillis()));
     }
 
     List<LogEntry> bufferEntries = wal.readBuffer();
@@ -49,7 +49,7 @@ public class WriteAheadLogTest {
 
     for (int i = 0; i < 9; i++) {
       byte[] data = ("entry-" + i).getBytes();
-      wal.append(new LogEntry(data.length, data));
+      wal.append(new LogEntry(data.length, data, System.currentTimeMillis()));
     }
 
     System.out.println("  After 9 appends:");
@@ -59,7 +59,7 @@ public class WriteAheadLogTest {
     assertTrue(wal.readFromDisk().isEmpty());
 
     byte[] data = ("entry-9").getBytes();
-    wal.append(new LogEntry(data.length, data));
+    wal.append(new LogEntry(data.length, data, System.currentTimeMillis()));
 
     System.out.println("  After 10th append (batch full):");
     System.out.println("    Buffer: " + wal.readBuffer().size() + " (expected 0)");
@@ -80,7 +80,7 @@ public class WriteAheadLogTest {
     System.out.println("  Appending 7 entries...");
     for (int i = 0; i < 7; i++) {
       byte[] data = ("batch1-" + i).getBytes();
-      wal.append(new LogEntry(data.length, data));
+      wal.append(new LogEntry(data.length, data, System.currentTimeMillis()));
     }
     System.out.println(
         "    Buffer: " + wal.readBuffer().size() + ", Disk: " + wal.readFromDisk().size());
@@ -88,7 +88,7 @@ public class WriteAheadLogTest {
     System.out.println("  Appending 5 more entries (triggers batch)...");
     for (int i = 0; i < 5; i++) {
       byte[] data = ("batch2-" + i).getBytes();
-      wal.append(new LogEntry(data.length, data));
+      wal.append(new LogEntry(data.length, data, System.currentTimeMillis()));
     }
     System.out.println(
         "    Buffer: " + wal.readBuffer().size() + ", Disk: " + wal.readFromDisk().size());
@@ -96,7 +96,7 @@ public class WriteAheadLogTest {
     System.out.println("  Appending 3 more entries...");
     for (int i = 0; i < 3; i++) {
       byte[] data = ("batch3-" + i).getBytes();
-      wal.append(new LogEntry(data.length, data));
+      wal.append(new LogEntry(data.length, data, System.currentTimeMillis()));
     }
     System.out.println(
         "    Buffer: " + wal.readBuffer().size() + ", Disk: " + wal.readFromDisk().size());
@@ -116,7 +116,7 @@ public class WriteAheadLogTest {
       WriteAheadLog wal = new WriteAheadLog(10, LOG_PATH);
       for (int i = 0; i < 15; i++) {
         byte[] data = ("entry-" + i).getBytes();
-        wal.append(new LogEntry(data.length, data));
+        wal.append(new LogEntry(data.length, data, System.currentTimeMillis()));
       }
       System.out.println("  Session 1: Wrote 15 entries");
       System.out.println(
@@ -148,7 +148,7 @@ public class WriteAheadLogTest {
       WriteAheadLog wal = new WriteAheadLog(10, LOG_PATH);
       for (int i = 0; i < 12; i++) {
         byte[] data = ("entry-" + i).getBytes();
-        wal.append(new LogEntry(data.length, data));
+        wal.append(new LogEntry(data.length, data, System.currentTimeMillis()));
       }
       // DON'T close - simulate crash
       System.out.println("  Session 1: Wrote 12 entries (10 flushed, 2 in buffer)");
@@ -176,12 +176,12 @@ public class WriteAheadLogTest {
     WriteAheadLog wal = new WriteAheadLog(10, LOG_PATH);
     for (int i = 0; i < 10; i++) {
       byte[] data = ("entry-flush-" + i).getBytes();
-      wal.append(new LogEntry(data.length, data));
+      wal.append(new LogEntry(data.length, data, System.currentTimeMillis()));
     }
 
     for (int i = 0; i < 3; i++) {
       byte[] data = ("entry-buffer-" + i).getBytes();
-      wal.append(new LogEntry(data.length, data));
+      wal.append(new LogEntry(data.length, data, System.currentTimeMillis()));
     }
 
     assertEquals(3, wal.readBuffer().size(), "Buffer should have 3 entries");
