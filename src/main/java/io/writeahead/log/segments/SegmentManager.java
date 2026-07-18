@@ -1,12 +1,14 @@
 package io.writeahead.log.segments;
 
 import io.writeahead.log.constants.WalConstants;
+import io.writeahead.log.exceptions.CorruptedEntryException;
 import io.writeahead.log.fileio.FileUtils;
 import io.writeahead.log.meta.MetaDataManager;
 import io.writeahead.log.models.FileStream;
 import io.writeahead.log.models.LogEntry;
 import io.writeahead.log.models.SegmentMetadata;
 import io.writeahead.log.models.WalMetadata;
+import io.writeahead.log.utils.Crc32Utils;
 import java.io.*;
 import java.time.Instant;
 import java.time.ZoneId;
@@ -72,13 +74,33 @@ public class SegmentManager {
       ByteArrayInputStream byteArrayInputStream = new ByteArrayInputStream(allBytes);
       DataInputStream dataInputStream = new DataInputStream(byteArrayInputStream);
 
-      while (byteArrayInputStream.available() > 0) {
-        long timestamp = dataInputStream.readLong();
-        int size = dataInputStream.readInt();
-        byte[] data = new byte[size];
-        dataInputStream.readFully(data);
+      long entriesRead = 0;
 
-        allEntries.add(new LogEntry(size, data, timestamp));
+      while (byteArrayInputStream.available() > 0) {
+        try {
+          long timestamp = dataInputStream.readLong();
+          int size = dataInputStream.readInt();
+          byte[] data = new byte[size];
+          dataInputStream.readFully(data);
+
+          long computedCrc = Crc32Utils.compute(timestamp, size, data);
+          long storedCrc = dataInputStream.readLong();
+
+          if (computedCrc != storedCrc) {
+            throw new CorruptedEntryException(
+                logFile.getName(),
+                allBytes.length - byteArrayInputStream.available(),
+                computedCrc,
+                storedCrc,
+                entriesRead);
+          }
+
+          allEntries.add(new LogEntry(size, data, timestamp));
+          entriesRead++;
+        } catch (EOFException ex) {
+          System.err.println("Incomplete entry at end of " + logFile.getName());
+          break;
+        }
       }
 
       dataInputStream.close();
@@ -108,14 +130,34 @@ public class SegmentManager {
       ByteArrayInputStream byteArrayInputStream = new ByteArrayInputStream(allBytes);
       DataInputStream dataInputStream = new DataInputStream(byteArrayInputStream);
 
-      while (byteArrayInputStream.available() > 0) {
-        long entryTimestamp = dataInputStream.readLong();
-        int size = dataInputStream.readInt();
-        byte[] data = new byte[size];
-        dataInputStream.readFully(data);
+      int entriesRead = 0;
 
-        if (entryTimestamp > timestamp) {
-          entriesAfterTimestamp.add(new LogEntry(size, data, entryTimestamp));
+      while (byteArrayInputStream.available() > 0) {
+        try {
+          long entryTimestamp = dataInputStream.readLong();
+          int size = dataInputStream.readInt();
+          byte[] data = new byte[size];
+          dataInputStream.readFully(data);
+
+          long computedCrc = Crc32Utils.compute(entryTimestamp, size, data);
+          long storedCrc = dataInputStream.readLong();
+
+          if (computedCrc != storedCrc) {
+            throw new CorruptedEntryException(
+                segmentMetadata.filename(),
+                allBytes.length - byteArrayInputStream.available(),
+                computedCrc,
+                storedCrc,
+                entriesRead);
+          }
+
+          if (entryTimestamp > timestamp) {
+            entriesAfterTimestamp.add(new LogEntry(size, data, entryTimestamp));
+          }
+          entriesRead++;
+        } catch (EOFException ex) {
+          System.err.println("Incomplete entry at end of " + segmentMetadata.filename());
+          break;
         }
       }
 
@@ -225,13 +267,19 @@ public class SegmentManager {
     dataOutputStream.writeInt(entry.size());
     dataOutputStream.write(entry.data());
 
+    byte[] result = byteArrayOutputStream.toByteArray();
+
+    long crc32 = Crc32Utils.compute(result);
+
+    dataOutputStream.writeLong(crc32);
+
     dataOutputStream.flush();
 
-    byte[] result = byteArrayOutputStream.toByteArray();
+    byte[] resultWithCrc = byteArrayOutputStream.toByteArray();
 
     dataOutputStream.close();
     byteArrayOutputStream.close();
 
-    return result;
+    return resultWithCrc;
   }
 }

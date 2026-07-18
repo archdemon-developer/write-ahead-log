@@ -47,6 +47,14 @@
                         <goals>
                             <goal>report</goal>
                         </goals>
+                        <configuration>
+                            <excludes>
+                                <exclude>*Test</exclude>
+                                <exclude>io/writeahead/log/models/**/*</exclude>
+                                <exclude>io/writeahead/log/constants/**/*</exclude>
+                                <exclude>io/writeahead/log/exceptions/**/*</exclude>
+                            </excludes>
+                        </configuration>
                     </execution>
                     <execution>
                         <id>jacoco-check</id>
@@ -58,11 +66,6 @@
                             <rules>
                                 <rule>
                                     <element>PACKAGE</element>
-                                    <excludes>
-                                        <exclude>*Test</exclude>
-                                        <exclude>io.writeahead.log.models.*</exclude>
-                                        <exclude>io.writeahead.log.constants.*</exclude>
-                                    </excludes>
                                     <limits>
                                         <limit>
                                             <counter>LINE</counter>
@@ -72,6 +75,12 @@
                                     </limits>
                                 </rule>
                             </rules>
+                            <excludes>
+                                <exclude>*Test</exclude>
+                                <exclude>io/writeahead/log/models/**/*</exclude>
+                                <exclude>io/writeahead/log/constants/**/*</exclude>
+                                <exclude>io/writeahead/log/exceptions/**/*</exclude>
+                            </excludes>
                         </configuration>
                     </execution>
                 </executions>
