@@ -27,7 +27,7 @@ public class WriteAheadLog {
     }
   }
 
-  public List<LogEntry> read() throws IOException {
+  public List<LogEntry> read() {
     return Collections.unmodifiableList(batch);
   }
 
