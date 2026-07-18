@@ -1,7 +1,8 @@
 package io.writeahead.log;
 
-import io.writeahead.log.fileio.FileUtils2;
 import io.writeahead.log.models.LogEntry;
+import io.writeahead.log.segments.SegmentManager;
+
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -11,18 +12,18 @@ public class WriteAheadLog {
 
   private final int batchSize;
   private final List<LogEntry> batch;
-  private final FileUtils2 fileUtils2;
+  private final SegmentManager segmentManager;
 
   public WriteAheadLog(int batchSize, String logPath) throws IOException {
     this.batchSize = batchSize;
     this.batch = new ArrayList<>();
-    this.fileUtils2 = new FileUtils2(logPath);
+    this.segmentManager = new SegmentManager(logPath);
   }
 
   public void append(LogEntry entry) throws IOException {
     batch.add(entry);
     if (batch.size() == batchSize) {
-      fileUtils2.writeAll(batch);
+      segmentManager.writeBatch(batch);
       batch.clear();
     }
   }
@@ -33,24 +34,32 @@ public class WriteAheadLog {
 
   public List<LogEntry> readAll() throws IOException {
     List<LogEntry> entries = new ArrayList<>();
-    entries.addAll(fileUtils2.readAll());
+    entries.addAll(segmentManager.readAllSegments());
     entries.addAll(batch);
     return Collections.unmodifiableList(entries);
   }
 
   public List<LogEntry> readFromDisk() throws IOException {
-    return Collections.unmodifiableList(fileUtils2.readAll());
+    return Collections.unmodifiableList(segmentManager.readAllSegments());
   }
 
   public List<LogEntry> readBuffer() {
     return Collections.unmodifiableList(batch);
   }
 
+  public List<LogEntry> readAllAfterTimestamp(long timestamp) throws IOException {
+    return Collections.unmodifiableList(segmentManager.readAllAfterTimestamp(timestamp));
+  }
+
+  public void truncateBeforeTimestamp(long timestamp) throws IOException {
+    segmentManager.truncateBeforeTimestamp(timestamp);
+  }
+
   public void close() throws IOException {
     if (!batch.isEmpty()) {
-      fileUtils2.writeAll(batch);
+      segmentManager.writeBatch(batch);
       batch.clear();
     }
-    fileUtils2.close();
+    segmentManager.close();
   }
 }
