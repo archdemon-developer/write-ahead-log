@@ -53,7 +53,7 @@
                                 <exclude>io/writeahead/log/models/**/*</exclude>
                                 <exclude>io/writeahead/log/constants/**/*</exclude>
                                 <exclude>io/writeahead/log/exceptions/**/*</exclude>
-                                <exclude>io.writeahead.log.logging.*</exclude>
+                                <exclude>io/writeahead/log/logging/**/*</exclude>
                             </excludes>
                         </configuration>
                     </execution>
