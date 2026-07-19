@@ -1,8 +1,9 @@
-package io.writeahead.log.segments;
+package io.writeahead.log.storage;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 import io.writeahead.log.models.LogEntry;
+import io.writeahead.log.models.WalConfiguration;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Path;
@@ -11,7 +12,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-public class SegmentManagerTest {
+public class SegmentStoreManagerTest {
 
   @TempDir Path tempDir;
 
@@ -24,7 +25,8 @@ public class SegmentManagerTest {
 
   @Test
   void testCreateNewSegmentOnStartup() throws IOException {
-    SegmentManager manager = new SegmentManager(logDir);
+    WalConfiguration config = new WalConfiguration.Builder().logDir(logDir).build();
+    SegmentStoreManager manager = new SegmentStoreManager(config, new MetaDataStoreManager(config));
 
     // Verify segment file exists
     File[] logFiles = tempDir.toFile().listFiles((dir, name) -> name.endsWith(".log"));
@@ -40,7 +42,8 @@ public class SegmentManagerTest {
 
   @Test
   void testWriteBatchAndPersist() throws IOException {
-    SegmentManager manager = new SegmentManager(logDir);
+    WalConfiguration config = new WalConfiguration.Builder().logDir(logDir).build();
+    SegmentStoreManager manager = new SegmentStoreManager(config, new MetaDataStoreManager(config));
 
     List<LogEntry> batch =
         List.of(
@@ -51,7 +54,8 @@ public class SegmentManagerTest {
     manager.writeBatch(batch);
     manager.close();
 
-    SegmentManager manager2 = new SegmentManager(logDir);
+    SegmentStoreManager manager2 =
+        new SegmentStoreManager(config, new MetaDataStoreManager(config));
     List<LogEntry> recovered = manager2.readAllSegments();
 
     assertEquals(3, recovered.size(), "Should recover all written entries");
@@ -64,7 +68,8 @@ public class SegmentManagerTest {
 
   @Test
   void testSegmentRotationAtThreshold() throws IOException {
-    SegmentManager manager = new SegmentManager(logDir);
+    WalConfiguration config = new WalConfiguration.Builder().logDir(logDir).build();
+    SegmentStoreManager manager = new SegmentStoreManager(config, new MetaDataStoreManager(config));
 
     byte[] largeData = new byte[5 * 1024 * 1024];
     for (int i = 0; i < largeData.length; i++) {
@@ -93,7 +98,8 @@ public class SegmentManagerTest {
 
   @Test
   void testReadAllSegmentsInOrder() throws IOException {
-    SegmentManager manager = new SegmentManager(logDir);
+    WalConfiguration config = new WalConfiguration.Builder().logDir(logDir).build();
+    SegmentStoreManager manager = new SegmentStoreManager(config, new MetaDataStoreManager(config));
 
     // Write multiple batches
     for (int batch = 0; batch < 3; batch++) {
@@ -113,7 +119,8 @@ public class SegmentManagerTest {
     manager.close();
 
     // Reopen and read all
-    SegmentManager manager2 = new SegmentManager(logDir);
+    SegmentStoreManager manager2 =
+        new SegmentStoreManager(config, new MetaDataStoreManager(config));
     List<LogEntry> allEntries = manager2.readAllSegments();
 
     assertEquals(6, allEntries.size(), "Should read all entries from all segments");
@@ -128,7 +135,8 @@ public class SegmentManagerTest {
 
   @Test
   void testReadAllAfterTimestamp() throws IOException {
-    SegmentManager manager = new SegmentManager(logDir);
+    WalConfiguration config = new WalConfiguration.Builder().logDir(logDir).build();
+    SegmentStoreManager manager = new SegmentStoreManager(config, new MetaDataStoreManager(config));
 
     // Write entries with specific timestamps
     List<LogEntry> batch =
@@ -142,7 +150,8 @@ public class SegmentManagerTest {
     manager.close();
 
     // Reopen and query after timestamp 2500
-    SegmentManager manager2 = new SegmentManager(logDir);
+    SegmentStoreManager manager2 =
+        new SegmentStoreManager(config, new MetaDataStoreManager(config));
     List<LogEntry> afterTimestamp = manager2.readAllAfterTimestamp(2500);
 
     assertEquals(2, afterTimestamp.size(), "Should return entries after timestamp 2500");
@@ -154,7 +163,8 @@ public class SegmentManagerTest {
 
   @Test
   void testReadAllAfterTimestampNoMatches() throws IOException {
-    SegmentManager manager = new SegmentManager(logDir);
+    WalConfiguration config = new WalConfiguration.Builder().logDir(logDir).build();
+    SegmentStoreManager manager = new SegmentStoreManager(config, new MetaDataStoreManager(config));
 
     List<LogEntry> batch =
         List.of(
@@ -164,7 +174,8 @@ public class SegmentManagerTest {
     manager.writeBatch(batch);
     manager.close();
 
-    SegmentManager manager2 = new SegmentManager(logDir);
+    SegmentStoreManager manager2 =
+        new SegmentStoreManager(config, new MetaDataStoreManager(config));
     List<LogEntry> afterTimestamp = manager2.readAllAfterTimestamp(5000);
 
     assertTrue(afterTimestamp.isEmpty(), "Should return empty list when no entries match");
@@ -174,7 +185,8 @@ public class SegmentManagerTest {
 
   @Test
   void testTruncateBeforeTimestamp() throws IOException {
-    SegmentManager manager = new SegmentManager(logDir);
+    WalConfiguration config = new WalConfiguration.Builder().logDir(logDir).build();
+    SegmentStoreManager manager = new SegmentStoreManager(config, new MetaDataStoreManager(config));
 
     byte[] largeData = new byte[5 * 1024 * 1024 + 512 * 1024]; // 5.5MB per entry
 
@@ -196,7 +208,8 @@ public class SegmentManagerTest {
 
   @Test
   void testTruncateBeforeTimestampKeepsAtLeastOneSegment() throws IOException {
-    SegmentManager manager = new SegmentManager(logDir);
+    WalConfiguration config = new WalConfiguration.Builder().logDir(logDir).build();
+    SegmentStoreManager manager = new SegmentStoreManager(config, new MetaDataStoreManager(config));
 
     // Write single entry
     List<LogEntry> batch =
@@ -206,7 +219,8 @@ public class SegmentManagerTest {
     manager.close();
 
     // Try to truncate before all timestamps
-    SegmentManager manager2 = new SegmentManager(logDir);
+    SegmentStoreManager manager2 =
+        new SegmentStoreManager(config, new MetaDataStoreManager(config));
     manager2.truncateBeforeTimestamp(5000); // After all entries
 
     // Verify at least one segment remains (safety guarantee)
@@ -219,21 +233,25 @@ public class SegmentManagerTest {
   @Test
   void testMetadataConsistencyAcrossRestarts() throws IOException {
     // Session 1: Write data
-    SegmentManager manager1 = new SegmentManager(logDir);
+    WalConfiguration config = new WalConfiguration.Builder().logDir(logDir).build();
+    SegmentStoreManager manager1 =
+        new SegmentStoreManager(config, new MetaDataStoreManager(config));
     List<LogEntry> batch1 =
         List.of(new LogEntry("entry-1".getBytes().length, "entry-1".getBytes(), 1000));
     manager1.writeBatch(batch1);
     manager1.close();
 
     // Session 2: Add more data
-    SegmentManager manager2 = new SegmentManager(logDir);
+    SegmentStoreManager manager2 =
+        new SegmentStoreManager(config, new MetaDataStoreManager(config));
     List<LogEntry> batch2 =
         List.of(new LogEntry("entry-2".getBytes().length, "entry-2".getBytes(), 2000));
     manager2.writeBatch(batch2);
     manager2.close();
 
     // Session 3: Verify all data
-    SegmentManager manager3 = new SegmentManager(logDir);
+    SegmentStoreManager manager3 =
+        new SegmentStoreManager(config, new MetaDataStoreManager(config));
     List<LogEntry> allEntries = manager3.readAllSegments();
 
     assertEquals(2, allEntries.size(), "Should have both entries from both sessions");
@@ -245,7 +263,8 @@ public class SegmentManagerTest {
 
   @Test
   void testTimestampTrackingInMetadata() throws IOException {
-    SegmentManager manager = new SegmentManager(logDir);
+    WalConfiguration config = new WalConfiguration.Builder().logDir(logDir).build();
+    SegmentStoreManager manager = new SegmentStoreManager(config, new MetaDataStoreManager(config));
 
     // Write batch with known timestamps
     List<LogEntry> batch =
@@ -257,7 +276,8 @@ public class SegmentManagerTest {
     manager.close();
 
     // Reopen and check that metadata tracked min/max timestamps
-    SegmentManager manager2 = new SegmentManager(logDir);
+    SegmentStoreManager manager2 =
+        new SegmentStoreManager(config, new MetaDataStoreManager(config));
     List<LogEntry> entries = manager2.readAllSegments();
 
     assertEquals(5000, entries.get(0).timestamp(), "First entry timestamp should be preserved");
@@ -268,7 +288,8 @@ public class SegmentManagerTest {
 
   @Test
   void testWriteBatchWithEmptyTimestamps() throws IOException {
-    SegmentManager manager = new SegmentManager(logDir);
+    WalConfiguration config = new WalConfiguration.Builder().logDir(logDir).build();
+    SegmentStoreManager manager = new SegmentStoreManager(config, new MetaDataStoreManager(config));
 
     // Write batch with timestamp 0
     List<LogEntry> batch =
@@ -279,18 +300,20 @@ public class SegmentManagerTest {
     manager.writeBatch(batch);
     manager.close();
 
-    SegmentManager manager2 = new SegmentManager(logDir);
+    SegmentStoreManager manager2 =
+        new SegmentStoreManager(config, new MetaDataStoreManager(config));
     List<LogEntry> recovered = manager2.readAllSegments();
 
     assertEquals(2, recovered.size());
-    assertEquals(0, recovered.get(0).timestamp());
+    assertEquals(0, recovered.getFirst().timestamp());
 
     manager2.close();
   }
 
   @Test
   void testRotateSegmentUpdatesMetadata() throws IOException {
-    SegmentManager manager = new SegmentManager(logDir);
+    WalConfiguration config = new WalConfiguration.Builder().logDir(logDir).build();
+    SegmentStoreManager manager = new SegmentStoreManager(config, new MetaDataStoreManager(config));
 
     // Write large batch to trigger rotation
     byte[] largeData = new byte[5 * 1024 * 1024 + 512 * 1024];

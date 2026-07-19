@@ -1,4 +1,4 @@
-package io.writeahead.log.fileio;
+package io.writeahead.log.utils;
 
 import static org.junit.jupiter.api.Assertions.*;
 

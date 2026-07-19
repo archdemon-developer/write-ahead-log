@@ -1,11 +1,11 @@
-package io.writeahead.log.meta;
+package io.writeahead.log.utils;
 
 import io.writeahead.log.models.SegmentMetadata;
 import io.writeahead.log.models.WalMetadata;
 import java.util.ArrayList;
 import java.util.List;
 
-public class MetadataParser {
+public class MetadataParserUtils {
   public static String toJson(WalMetadata metadata) {
     StringBuilder jsonBuilder = new StringBuilder();
     jsonBuilder.append("{\n");

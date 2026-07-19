@@ -4,8 +4,9 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import io.writeahead.log.WriteAheadLog;
 import io.writeahead.log.exceptions.CorruptedEntryException;
-import io.writeahead.log.fileio.FileUtils;
 import io.writeahead.log.models.LogEntry;
+import io.writeahead.log.models.WalConfiguration;
+import io.writeahead.log.utils.FileUtils;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -28,7 +29,8 @@ public class CorruptionDetectionTest {
   @Test
   void testCorruptedEntryDetected() throws IOException {
     {
-      WriteAheadLog wal = new WriteAheadLog(5, logPath);
+      WalConfiguration config = new WalConfiguration.Builder().batchSize(5).logDir(logPath).build();
+      WriteAheadLog wal = new WriteAheadLog(config);
       wal.append(new LogEntry("entry-1".getBytes().length, "entry-1".getBytes(), 1000));
       wal.append(new LogEntry("entry-2".getBytes().length, "entry-2".getBytes(), 2000));
       wal.append(new LogEntry("entry-3".getBytes().length, "entry-3".getBytes(), 3000));
@@ -47,7 +49,8 @@ public class CorruptionDetectionTest {
     }
 
     {
-      WriteAheadLog wal = new WriteAheadLog(5, logPath);
+      WalConfiguration config = new WalConfiguration.Builder().batchSize(5).logDir(logPath).build();
+      WriteAheadLog wal = new WriteAheadLog(config);
       CorruptedEntryException exception =
           assertThrows(
               CorruptedEntryException.class,
@@ -63,7 +66,8 @@ public class CorruptionDetectionTest {
   @Test
   void testPartialEntryAtEofHandled() throws IOException {
     {
-      WriteAheadLog wal = new WriteAheadLog(3, logPath); // Changed from 10 to 3
+      WalConfiguration config = new WalConfiguration.Builder().batchSize(3).logDir(logPath).build();
+      WriteAheadLog wal = new WriteAheadLog(config);
 
       // This will trigger 1 flush after 3rd entry
       for (int i = 0; i < 5; i++) {
@@ -88,7 +92,8 @@ public class CorruptionDetectionTest {
     }
 
     {
-      WriteAheadLog wal = new WriteAheadLog(3, logPath);
+      WalConfiguration config = new WalConfiguration.Builder().batchSize(3).logDir(logPath).build();
+      WriteAheadLog wal = new WriteAheadLog(config);
       List<LogEntry> recovered = wal.readFromDisk();
 
       assertFalse(recovered.isEmpty(), "Should recover at least some entries before truncation");
@@ -101,7 +106,8 @@ public class CorruptionDetectionTest {
   @Test
   void testNormalWriteReadStillWorks() throws IOException {
     {
-      WriteAheadLog wal = new WriteAheadLog(5, logPath);
+      WalConfiguration config = new WalConfiguration.Builder().batchSize(5).logDir(logPath).build();
+      WriteAheadLog wal = new WriteAheadLog(config);
       for (int i = 0; i < 5; i++) {
         byte[] data = ("entry-" + i).getBytes();
         wal.append(new LogEntry(data.length, data, 1000 + i));
@@ -110,7 +116,8 @@ public class CorruptionDetectionTest {
     }
 
     {
-      WriteAheadLog wal = new WriteAheadLog(5, logPath);
+      WalConfiguration config = new WalConfiguration.Builder().batchSize(5).logDir(logPath).build();
+      WriteAheadLog wal = new WriteAheadLog(config);
       List<LogEntry> recovered = wal.readFromDisk();
       assertEquals(5, recovered.size(), "Should recover all 5 entries");
       assertEquals("entry-0", new String(recovered.get(0).data()));
@@ -123,7 +130,9 @@ public class CorruptionDetectionTest {
   @Test
   void testCorruptedCrcValueDetected() throws IOException {
     {
-      WriteAheadLog wal = new WriteAheadLog(10, logPath);
+      WalConfiguration config =
+          new WalConfiguration.Builder().batchSize(10).logDir(logPath).build();
+      WriteAheadLog wal = new WriteAheadLog(config);
       byte[] data = "test-data".getBytes();
       wal.append(new LogEntry(data.length, data, 5000));
       wal.close();
@@ -142,7 +151,9 @@ public class CorruptionDetectionTest {
     }
 
     {
-      WriteAheadLog wal = new WriteAheadLog(10, logPath);
+      WalConfiguration config =
+          new WalConfiguration.Builder().batchSize(10).logDir(logPath).build();
+      WriteAheadLog wal = new WriteAheadLog(config);
       assertThrows(
           CorruptedEntryException.class,
           wal::readFromDisk,
@@ -154,7 +165,9 @@ public class CorruptionDetectionTest {
   @Test
   void testDataCorruptionDetected() throws IOException {
     {
-      WriteAheadLog wal = new WriteAheadLog(10, logPath);
+      WalConfiguration config =
+          new WalConfiguration.Builder().batchSize(10).logDir(logPath).build();
+      WriteAheadLog wal = new WriteAheadLog(config);
       byte[] data = "important-data".getBytes();
       wal.append(new LogEntry(data.length, data, 7000));
       wal.close();
@@ -171,7 +184,9 @@ public class CorruptionDetectionTest {
     }
 
     {
-      WriteAheadLog wal = new WriteAheadLog(10, logPath);
+      WalConfiguration config =
+          new WalConfiguration.Builder().batchSize(10).logDir(logPath).build();
+      WriteAheadLog wal = new WriteAheadLog(config);
       CorruptedEntryException exception =
           assertThrows(
               CorruptedEntryException.class,
@@ -187,7 +202,8 @@ public class CorruptionDetectionTest {
   @Test
   void testMultipleEntriesStopsAtCorruption() throws IOException {
     {
-      WriteAheadLog wal = new WriteAheadLog(3, logPath);
+      WalConfiguration config = new WalConfiguration.Builder().batchSize(3).logDir(logPath).build();
+      WriteAheadLog wal = new WriteAheadLog(config);
       for (int i = 0; i < 6; i++) {
         byte[] data = ("entry-" + i).getBytes();
         wal.append(new LogEntry(data.length, data, 1000 + i));
@@ -206,7 +222,8 @@ public class CorruptionDetectionTest {
     }
 
     {
-      WriteAheadLog wal = new WriteAheadLog(3, logPath);
+      WalConfiguration config = new WalConfiguration.Builder().batchSize(3).logDir(logPath).build();
+      WriteAheadLog wal = new WriteAheadLog(config);
       assertThrows(
           CorruptedEntryException.class,
           wal::readFromDisk,

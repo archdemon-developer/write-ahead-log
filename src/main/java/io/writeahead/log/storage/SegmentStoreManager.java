@@ -1,16 +1,12 @@
-package io.writeahead.log.segments;
+package io.writeahead.log.storage;
 
 import io.writeahead.log.constants.WalConstants;
 import io.writeahead.log.exceptions.CorruptedEntryException;
-import io.writeahead.log.fileio.FileUtils;
 import io.writeahead.log.logging.Logger;
 import io.writeahead.log.logging.LoggerFactory;
-import io.writeahead.log.meta.MetaDataManager;
-import io.writeahead.log.models.FileStream;
-import io.writeahead.log.models.LogEntry;
-import io.writeahead.log.models.SegmentMetadata;
-import io.writeahead.log.models.WalMetadata;
+import io.writeahead.log.models.*;
 import io.writeahead.log.utils.Crc32Utils;
+import io.writeahead.log.utils.FileUtils;
 import java.io.*;
 import java.time.Instant;
 import java.time.ZoneId;
@@ -19,10 +15,12 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 
-public class SegmentManager {
+public class SegmentStoreManager implements SegmentStore {
 
   private final String logDir;
-  private final MetaDataManager metaDataManager;
+  private final MetadataStore metadataStore;
+
+  private final WalConfiguration config;
 
   private File currentSegment;
   private FileStream currentStream;
@@ -30,45 +28,54 @@ public class SegmentManager {
   private long currentSegmentMinTimestamp;
   private long currentSegmentMaxTimestamp;
 
-  private static final Logger log = LoggerFactory.getLogger(SegmentManager.class);
+  private static final Logger log = LoggerFactory.getLogger(SegmentStoreManager.class);
 
-  private static final long MAX_SEGMENT_SIZE = 10 * 1024 * 1024;
-
-  public SegmentManager(String logDir) throws IOException {
-    this.logDir = logDir;
+  public SegmentStoreManager(WalConfiguration configuration, MetadataStore metadataStore)
+      throws IOException {
+    this.config = configuration;
+    this.logDir = config.logDir();
     FileUtils.createDirectory(logDir);
-    this.metaDataManager = new MetaDataManager(logDir);
-    WalMetadata walMetadata = metaDataManager.read();
+    this.metadataStore = metadataStore;
+    WalMetadata walMetadata = metadataStore.read();
 
     if (walMetadata.lastActiveSegment() != null) {
       currentSegment = new File(logDir + "/" + walMetadata.lastActiveSegment());
       currentStream = FileUtils.openAppendStream(currentSegment);
       currentSegmentSize = FileUtils.getFileSize(currentSegment);
+      log.info("Opened existing segment: {}", currentSegment.getName());
     } else {
       createNewSegment();
     }
   }
 
+  @Override
   public void writeBatch(List<LogEntry> batch) throws IOException {
-      for (LogEntry logEntry : batch) {
-        byte[] entryBytes = logEntryToBytes(logEntry);
-        FileUtils.writeToStream(currentStream, entryBytes);
+    log.debug(
+        "Writing batch: {} entries, {} bytes",
+        batch.size(),
+        batch.stream().mapToInt(LogEntry::size).sum());
+    for (LogEntry logEntry : batch) {
+      byte[] entryBytes = logEntryToBytes(logEntry);
+      FileUtils.writeToStream(currentStream, entryBytes);
 
-        if (currentSegmentSize == 0) {
-          currentSegmentMinTimestamp = logEntry.timestamp();
-        }
-
-        currentSegmentMaxTimestamp = logEntry.timestamp();
-        currentSegmentSize += entryBytes.length;
+      if (currentSegmentSize == 0) {
+        currentSegmentMinTimestamp = logEntry.timestamp();
       }
 
-      FileUtils.fsyncStream(currentStream);
+      currentSegmentMaxTimestamp = logEntry.timestamp();
+      currentSegmentSize += entryBytes.length;
+    }
 
-      if (currentSegmentSize > MAX_SEGMENT_SIZE) {
-        rotateSegment();
-      }
+    FileUtils.fsyncStream(currentStream);
+
+    if (currentSegmentSize > config.segmentSizeBytes()) {
+      rotateSegment();
+    }
+
+    log.debug("Batch written and fsynced");
   }
 
+  @Override
   public List<LogEntry> readAllSegments() throws IOException {
     List<LogEntry> allEntries = new ArrayList<>();
 
@@ -113,8 +120,9 @@ public class SegmentManager {
     return allEntries;
   }
 
+  @Override
   public List<LogEntry> readAllAfterTimestamp(long timestamp) throws IOException {
-    WalMetadata walMetadata = metaDataManager.read();
+    WalMetadata walMetadata = metadataStore.read();
 
     List<SegmentMetadata> allSegments = walMetadata.segments();
     List<SegmentMetadata> segmentsAfterTimestamp = new ArrayList<>();
@@ -172,8 +180,9 @@ public class SegmentManager {
     return entriesAfterTimestamp;
   }
 
+  @Override
   public void truncateBeforeTimestamp(long timestamp) throws IOException {
-    WalMetadata walMetadata = metaDataManager.read();
+    WalMetadata walMetadata = metadataStore.read();
 
     List<SegmentMetadata> allSegments = walMetadata.segments();
     List<SegmentMetadata> segmentsToDelete = new ArrayList<>();
@@ -192,7 +201,7 @@ public class SegmentManager {
     List<SegmentMetadata> segmentsToKeep = new ArrayList<>(allSegments);
     segmentsToKeep.removeAll(segmentsToDelete);
 
-    metaDataManager.write(new WalMetadata(segmentsToKeep.getLast().filename(), segmentsToKeep));
+    metadataStore.write(new WalMetadata(segmentsToKeep.getLast().filename(), segmentsToKeep));
 
     for (SegmentMetadata segmentToDelete : segmentsToDelete) {
       boolean deleted =
@@ -203,8 +212,9 @@ public class SegmentManager {
     }
   }
 
+  @Override
   public void close() throws IOException {
-    WalMetadata walMetadata = metaDataManager.read();
+    WalMetadata walMetadata = metadataStore.read();
 
     List<SegmentMetadata> segments = new ArrayList<>(walMetadata.segments());
     SegmentMetadata finalSegment = segments.getLast();
@@ -214,7 +224,7 @@ public class SegmentManager {
             finalSegment.filename(), currentSegmentMinTimestamp, currentSegmentMaxTimestamp);
     segments.set(segments.size() - 1, newFinal);
 
-    metaDataManager.write(new WalMetadata(walMetadata.lastActiveSegment(), segments));
+    metadataStore.write(new WalMetadata(walMetadata.lastActiveSegment(), segments));
     FileUtils.closeStream(currentStream);
   }
 
@@ -229,17 +239,21 @@ public class SegmentManager {
     this.currentSegmentMinTimestamp = 0;
     this.currentSegmentMaxTimestamp = 0;
 
-    WalMetadata old = metaDataManager.read();
+    WalMetadata old = metadataStore.read();
     List<SegmentMetadata> allSegments = new ArrayList<>(old.segments());
     allSegments.add(new SegmentMetadata(filename, 0, 0));
 
-    metaDataManager.write(new WalMetadata(filename, allSegments));
+    metadataStore.write(new WalMetadata(filename, allSegments));
   }
 
   private void rotateSegment() throws IOException {
+    log.info(
+        "Rotating segment: {} (size: {} MB)",
+        currentSegment.getName(),
+        currentSegmentSize / (1024 * 1024));
     FileUtils.closeStream(currentStream);
 
-    WalMetadata oldWal = metaDataManager.read();
+    WalMetadata oldWal = metadataStore.read();
     List<SegmentMetadata> allSegments = new ArrayList<>(oldWal.segments());
 
     SegmentMetadata updated =
@@ -250,9 +264,10 @@ public class SegmentManager {
 
     allSegments.set(allSegments.size() - 1, updated);
 
-    metaDataManager.write(new WalMetadata(oldWal.lastActiveSegment(), allSegments));
+    metadataStore.write(new WalMetadata(oldWal.lastActiveSegment(), allSegments));
 
     createNewSegment();
+    log.info("New segment created: {}", currentSegment.getName());
   }
 
   private String formatTimestamp(long timestampMs) {

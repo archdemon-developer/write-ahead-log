@@ -3,6 +3,7 @@ package io.writeahead.log;
 import static org.junit.jupiter.api.Assertions.*;
 
 import io.writeahead.log.models.LogEntry;
+import io.writeahead.log.models.WalConfiguration;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
@@ -23,7 +24,8 @@ public class WriteAheadLogTest {
 
   @Test
   void testAppendBelowBatchSize() throws IOException {
-    WriteAheadLog wal = new WriteAheadLog(10, logPath);
+    WalConfiguration config = new WalConfiguration.Builder().batchSize(10).logDir(logPath).build();
+    WriteAheadLog wal = new WriteAheadLog(config);
 
     // Append 5 entries (less than batch size of 10)
     for (int i = 0; i < 5; i++) {
@@ -40,7 +42,8 @@ public class WriteAheadLogTest {
 
   @Test
   void testBatchFlushAtThreshold() throws IOException {
-    WriteAheadLog wal = new WriteAheadLog(10, logPath);
+    WalConfiguration config = new WalConfiguration.Builder().batchSize(10).logDir(logPath).build();
+    WriteAheadLog wal = new WriteAheadLog(config);
 
     // Append 9 entries (below threshold)
     for (int i = 0; i < 9; i++) {
@@ -63,7 +66,8 @@ public class WriteAheadLogTest {
 
   @Test
   void testMultipleBatches() throws IOException {
-    WriteAheadLog wal = new WriteAheadLog(5, logPath);
+    WalConfiguration config = new WalConfiguration.Builder().batchSize(5).logDir(logPath).build();
+    WriteAheadLog wal = new WriteAheadLog(config);
 
     // Write 3 full batches (15 entries)
     for (int i = 0; i < 15; i++) {
@@ -79,7 +83,8 @@ public class WriteAheadLogTest {
 
   @Test
   void testReadBuffer() throws IOException {
-    WriteAheadLog wal = new WriteAheadLog(10, logPath);
+    WalConfiguration config = new WalConfiguration.Builder().batchSize(10).logDir(logPath).build();
+    WriteAheadLog wal = new WriteAheadLog(config);
 
     List<LogEntry> entries =
         List.of(
@@ -100,7 +105,8 @@ public class WriteAheadLogTest {
 
   @Test
   void testReadFromDisk() throws IOException {
-    WriteAheadLog wal = new WriteAheadLog(5, logPath);
+    WalConfiguration config = new WalConfiguration.Builder().batchSize(5).logDir(logPath).build();
+    WriteAheadLog wal = new WriteAheadLog(config);
 
     // Write 10 entries (2 batches)
     for (int i = 0; i < 10; i++) {
@@ -116,7 +122,8 @@ public class WriteAheadLogTest {
 
   @Test
   void testReadAll() throws IOException {
-    WriteAheadLog wal = new WriteAheadLog(10, logPath);
+    WalConfiguration config = new WalConfiguration.Builder().batchSize(10).logDir(logPath).build();
+    WriteAheadLog wal = new WriteAheadLog(config);
 
     // Write 15 entries (1 batch flushed + 5 in buffer)
     for (int i = 0; i < 15; i++) {
@@ -138,7 +145,9 @@ public class WriteAheadLogTest {
   void testCloseFlushesRemainingBatch() throws IOException {
     // Session 1: Write and close (should flush remaining)
     {
-      WriteAheadLog wal = new WriteAheadLog(10, logPath);
+      WalConfiguration config =
+          new WalConfiguration.Builder().batchSize(10).logDir(logPath).build();
+      WriteAheadLog wal = new WriteAheadLog(config);
 
       // Write 15 entries (1 batch flushed + 5 remaining)
       for (int i = 0; i < 15; i++) {
@@ -152,7 +161,9 @@ public class WriteAheadLogTest {
 
     // Session 2: Recover and verify
     {
-      WriteAheadLog wal = new WriteAheadLog(10, logPath);
+      WalConfiguration config =
+          new WalConfiguration.Builder().batchSize(10).logDir(logPath).build();
+      WriteAheadLog wal = new WriteAheadLog(config);
       List<LogEntry> recovered = wal.readFromDisk();
 
       assertEquals(15, recovered.size(), "All 15 entries should survive close");
@@ -167,7 +178,9 @@ public class WriteAheadLogTest {
   void testCrashRecovery() throws IOException {
     // Session 1: Write 12 entries without closing (simulate crash)
     {
-      WriteAheadLog wal = new WriteAheadLog(10, logPath);
+      WalConfiguration config =
+          new WalConfiguration.Builder().batchSize(10).logDir(logPath).build();
+      WriteAheadLog wal = new WriteAheadLog(config);
 
       for (int i = 0; i < 12; i++) {
         byte[] data = ("entry-" + i).getBytes();
@@ -180,7 +193,9 @@ public class WriteAheadLogTest {
 
     // Session 2: Recover from crash
     {
-      WriteAheadLog wal = new WriteAheadLog(10, logPath);
+      WalConfiguration config =
+          new WalConfiguration.Builder().batchSize(10).logDir(logPath).build();
+      WriteAheadLog wal = new WriteAheadLog(config);
 
       List<LogEntry> recovered = wal.readFromDisk();
       assertEquals(10, recovered.size(), "Should recover only flushed entries");
@@ -194,7 +209,8 @@ public class WriteAheadLogTest {
 
   @Test
   void testReadAllAfterTimestamp() throws IOException {
-    WriteAheadLog wal = new WriteAheadLog(20, logPath);
+    WalConfiguration config = new WalConfiguration.Builder().batchSize(20).logDir(logPath).build();
+    WriteAheadLog wal = new WriteAheadLog(config);
 
     // Write entries with specific timestamps
     List<LogEntry> entries =
@@ -212,7 +228,7 @@ public class WriteAheadLogTest {
     wal.close();
 
     // Reopen and query
-    WriteAheadLog wal2 = new WriteAheadLog(20, logPath);
+    WriteAheadLog wal2 = new WriteAheadLog(config);
     List<LogEntry> afterTimestamp = wal2.readAllAfterTimestamp(2500);
 
     assertEquals(3, afterTimestamp.size(), "Should return 3 entries after timestamp 2500");
@@ -224,7 +240,8 @@ public class WriteAheadLogTest {
 
   @Test
   void testTruncateBeforeTimestamp() throws IOException {
-    WriteAheadLog wal = new WriteAheadLog(1, logPath);
+    WalConfiguration config = new WalConfiguration.Builder().batchSize(1).logDir(logPath).build();
+    WriteAheadLog wal = new WriteAheadLog(config);
 
     byte[] largeData = new byte[5 * 1024 * 1024];
 
@@ -241,12 +258,12 @@ public class WriteAheadLogTest {
     wal.close();
 
     // Truncate before 2500 - this removes Segment 1 (maxTs=2000)
-    WriteAheadLog wal2 = new WriteAheadLog(1, logPath);
+    WriteAheadLog wal2 = new WriteAheadLog(config);
     wal2.truncateBeforeTimestamp(2500);
     wal2.close();
 
     // Verify only Segment 2+ remain
-    WriteAheadLog wal3 = new WriteAheadLog(1, logPath);
+    WriteAheadLog wal3 = new WriteAheadLog(config);
     List<LogEntry> remaining = wal3.readFromDisk();
 
     assertTrue(remaining.size() < 3, "Should have fewer entries after truncation");
@@ -256,7 +273,8 @@ public class WriteAheadLogTest {
 
   @Test
   void testImmutabilityOfReturnedLists() throws IOException {
-    WriteAheadLog wal = new WriteAheadLog(10, logPath);
+    WalConfiguration config = new WalConfiguration.Builder().batchSize(10).logDir(logPath).build();
+    WriteAheadLog wal = new WriteAheadLog(config);
 
     byte[] data = "entry-1".getBytes();
     wal.append(new LogEntry(data.length, data, 1000));
@@ -274,7 +292,8 @@ public class WriteAheadLogTest {
   void testMultipleSessionsPreserveData() throws IOException {
     // Session 1
     {
-      WriteAheadLog wal = new WriteAheadLog(5, logPath);
+      WalConfiguration config = new WalConfiguration.Builder().batchSize(5).logDir(logPath).build();
+      WriteAheadLog wal = new WriteAheadLog(config);
       for (int i = 0; i < 7; i++) {
         byte[] data = ("session1-entry-" + i).getBytes();
         wal.append(new LogEntry(data.length, data, 1000 + i));
@@ -284,7 +303,8 @@ public class WriteAheadLogTest {
 
     // Session 2
     {
-      WriteAheadLog wal = new WriteAheadLog(5, logPath);
+      WalConfiguration config = new WalConfiguration.Builder().batchSize(5).logDir(logPath).build();
+      WriteAheadLog wal = new WriteAheadLog(config);
       for (int i = 0; i < 8; i++) {
         byte[] data = ("session2-entry-" + i).getBytes();
         wal.append(new LogEntry(data.length, data, 2000 + i));
@@ -294,7 +314,8 @@ public class WriteAheadLogTest {
 
     // Session 3: Verify all data
     {
-      WriteAheadLog wal = new WriteAheadLog(5, logPath);
+      WalConfiguration config = new WalConfiguration.Builder().batchSize(5).logDir(logPath).build();
+      WriteAheadLog wal = new WriteAheadLog(config);
       List<LogEntry> all = wal.readFromDisk();
 
       assertEquals(15, all.size(), "Should have entries from both sessions");
@@ -307,7 +328,8 @@ public class WriteAheadLogTest {
 
   @Test
   void testEmptyWalOnCreation() throws IOException {
-    WriteAheadLog wal = new WriteAheadLog(10, logPath);
+    WalConfiguration config = new WalConfiguration.Builder().batchSize(10).logDir(logPath).build();
+    WriteAheadLog wal = new WriteAheadLog(config);
 
     assertTrue(wal.readBuffer().isEmpty(), "Buffer should be empty on creation");
     assertTrue(wal.readFromDisk().isEmpty(), "Disk should be empty on creation");
@@ -318,7 +340,8 @@ public class WriteAheadLogTest {
 
   @Test
   void testLargeEntries() throws IOException {
-    WriteAheadLog wal = new WriteAheadLog(3, logPath);
+    WalConfiguration config = new WalConfiguration.Builder().batchSize(3).logDir(logPath).build();
+    WriteAheadLog wal = new WriteAheadLog(config);
 
     // Create large entries (1MB each)
     byte[] largeData = new byte[1024 * 1024];
@@ -344,7 +367,8 @@ public class WriteAheadLogTest {
 
   @Test
   void testReadMethodAliases() throws IOException {
-    WriteAheadLog wal = new WriteAheadLog(10, logPath);
+    WalConfiguration config = new WalConfiguration.Builder().batchSize(10).logDir(logPath).build();
+    WriteAheadLog wal = new WriteAheadLog(config);
 
     byte[] data = "entry-1".getBytes();
     wal.append(new LogEntry(data.length, data, 1000));

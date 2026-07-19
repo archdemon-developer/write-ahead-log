@@ -4,5 +4,5 @@ import java.io.IOException;
 
 @FunctionalInterface
 public interface LockAction<T> {
-    T execute() throws IOException;
+  T execute() throws IOException;
 }
