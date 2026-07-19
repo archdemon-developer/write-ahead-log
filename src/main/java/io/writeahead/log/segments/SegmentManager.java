@@ -58,7 +58,7 @@ public class SegmentManager {
         currentSegmentSize += entryBytes.length;
       }
 
-      //FileUtils.fsyncStream(currentStream);
+      FileUtils.fsyncStream(currentStream);
 
       if (currentSegmentSize > MAX_SEGMENT_SIZE) {
         rotateSegment();
