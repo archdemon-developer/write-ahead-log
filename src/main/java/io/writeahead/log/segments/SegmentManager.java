@@ -3,6 +3,8 @@ package io.writeahead.log.segments;
 import io.writeahead.log.constants.WalConstants;
 import io.writeahead.log.exceptions.CorruptedEntryException;
 import io.writeahead.log.fileio.FileUtils;
+import io.writeahead.log.logging.Logger;
+import io.writeahead.log.logging.LoggerFactory;
 import io.writeahead.log.meta.MetaDataManager;
 import io.writeahead.log.models.FileStream;
 import io.writeahead.log.models.LogEntry;
@@ -27,6 +29,8 @@ public class SegmentManager {
   private long currentSegmentSize;
   private long currentSegmentMinTimestamp;
   private long currentSegmentMaxTimestamp;
+
+  private static final Logger log = LoggerFactory.getLogger(SegmentManager.class);
 
   private static final long MAX_SEGMENT_SIZE = 10 * 1024 * 1024;
 
@@ -98,6 +102,7 @@ public class SegmentManager {
           allEntries.add(new LogEntry(size, data, timestamp));
           entriesRead++;
         } catch (EOFException ex) {
+          log.debug("Incomplete entry at end of file: {}", logFile.getName());
           break;
         }
       }
@@ -155,6 +160,7 @@ public class SegmentManager {
           }
           entriesRead++;
         } catch (EOFException ex) {
+          log.debug("Incomplete entry at end of segment: {}", segmentMetadata.filename());
           break;
         }
       }
@@ -192,7 +198,7 @@ public class SegmentManager {
       boolean deleted =
           FileUtils.deleteFile(FileUtils.getLogFile(logDir, segmentToDelete.filename()));
       if (!deleted) {
-        System.err.println("Warning: segment file didn't exist: " + segmentToDelete.filename());
+        log.warn("Segment file didn't exist: {}", segmentToDelete.filename());
       }
     }
   }

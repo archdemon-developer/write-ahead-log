@@ -72,16 +72,6 @@ public class LoadStressTest {
         System.out.println("Batch size: " + batchSize);
         System.out.println("Total entries: " + (numThreads * entriesPerThread));
 
-        // Warmup
-        long warmupStart = System.nanoTime();
-        WriteAheadLog warmupWal = new WriteAheadLog(batchSize, logPath + "-warmup");
-        for (int i = 0; i < 100; i++) {
-            warmupWal.append(new LogEntry("warmup".getBytes().length, "warmup".getBytes(), 1000));
-        }
-        warmupWal.close();
-        long warmupTime = (System.nanoTime() - warmupStart) / 1_000_000;
-        System.out.println("Warmup time: " + warmupTime + " ms");
-
         WriteAheadLog wal = new WriteAheadLog(batchSize, logPath);
 
 
@@ -150,14 +140,6 @@ public class LoadStressTest {
         System.out.println(String.format("P95 latency: %d ms", p95));
         System.out.println(String.format("P99 latency: %d ms", p99));
         System.out.println(String.format("Exceptions: %d", exceptions.get()));
-
-        System.out.println("\n--- Debug Timing ---");
-        System.out.println(String.format("Total operations: %d", totalEntries));
-        System.out.println(String.format("Total time: %d ms", durationMs));
-        System.out.println(String.format("Per-entry overhead: %.2f ms", (double) durationMs / totalEntries));
-        System.out.println(String.format("Thread count: %d", numThreads));
-        System.out.println(String.format("Entries per thread: %d", entriesPerThread));
-        System.out.println(String.format("Batch size: %d", batchSize));
 
         long fsyncs = (long) Math.ceil((double) totalEntries / batchSize);
         System.out.println(String.format("Estimated fsyncs: %d", fsyncs));
