@@ -2,6 +2,8 @@ package io.writeahead.log.utils;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import io.writeahead.log.enums.LogLevel;
+import io.writeahead.log.logging.LoggerFactory;
 import io.writeahead.log.models.FileStream;
 import java.io.File;
 import java.io.IOException;
@@ -19,6 +21,7 @@ public class FileUtilsTest {
   @BeforeEach
   void setUp() {
     logDir = tempDir.toString();
+    LoggerFactory.setLogLevel(LogLevel.ERROR);
   }
 
   @Test

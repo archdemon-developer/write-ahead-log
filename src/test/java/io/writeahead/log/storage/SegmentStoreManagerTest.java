@@ -2,6 +2,8 @@ package io.writeahead.log.storage;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import io.writeahead.log.enums.LogLevel;
+import io.writeahead.log.logging.LoggerFactory;
 import io.writeahead.log.models.LogEntry;
 import io.writeahead.log.models.WalConfiguration;
 import java.io.File;
@@ -21,6 +23,7 @@ public class SegmentStoreManagerTest {
   @BeforeEach
   void setUp() {
     logDir = tempDir.toString();
+    LoggerFactory.setLogLevel(LogLevel.ERROR);
   }
 
   @Test

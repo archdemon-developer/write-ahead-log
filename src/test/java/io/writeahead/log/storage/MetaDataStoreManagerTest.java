@@ -2,6 +2,8 @@ package io.writeahead.log.storage;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import io.writeahead.log.enums.LogLevel;
+import io.writeahead.log.logging.LoggerFactory;
 import io.writeahead.log.models.SegmentMetadata;
 import io.writeahead.log.models.WalConfiguration;
 import io.writeahead.log.models.WalMetadata;
@@ -23,6 +25,7 @@ public class MetaDataStoreManagerTest {
   void setUp() throws IOException {
     WalConfiguration config = new WalConfiguration.Builder().logDir(tempDir.toString()).build();
     metaDataStoreManager = new MetaDataStoreManager(config);
+    LoggerFactory.setLogLevel(LogLevel.ERROR);
   }
 
   @Test

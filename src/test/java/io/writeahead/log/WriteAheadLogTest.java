@@ -2,6 +2,8 @@ package io.writeahead.log;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import io.writeahead.log.enums.LogLevel;
+import io.writeahead.log.logging.LoggerFactory;
 import io.writeahead.log.models.LogEntry;
 import io.writeahead.log.models.WalConfiguration;
 import java.io.IOException;
@@ -20,6 +22,7 @@ public class WriteAheadLogTest {
   @BeforeEach
   void setUp() {
     logPath = tempDir.toString();
+    LoggerFactory.setLogLevel(LogLevel.ERROR);
   }
 
   @Test

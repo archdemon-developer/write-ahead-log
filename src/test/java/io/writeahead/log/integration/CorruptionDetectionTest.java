@@ -3,7 +3,9 @@ package io.writeahead.log.integration;
 import static org.junit.jupiter.api.Assertions.*;
 
 import io.writeahead.log.WriteAheadLog;
+import io.writeahead.log.enums.LogLevel;
 import io.writeahead.log.exceptions.CorruptedEntryException;
+import io.writeahead.log.logging.LoggerFactory;
 import io.writeahead.log.models.LogEntry;
 import io.writeahead.log.models.WalConfiguration;
 import io.writeahead.log.utils.FileUtils;
@@ -24,6 +26,7 @@ public class CorruptionDetectionTest {
   @BeforeEach
   void setUp() {
     logPath = tempDir.toString();
+    LoggerFactory.setLogLevel(LogLevel.ERROR);
   }
 
   @Test

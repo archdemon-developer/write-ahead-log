@@ -3,6 +3,8 @@ package io.writeahead.log.stress;
 import static org.junit.jupiter.api.Assertions.*;
 
 import io.writeahead.log.WriteAheadLog;
+import io.writeahead.log.enums.LogLevel;
+import io.writeahead.log.logging.LoggerFactory;
 import io.writeahead.log.models.LogEntry;
 import io.writeahead.log.models.WalConfiguration;
 import java.io.IOException;
@@ -23,6 +25,7 @@ public class LoadStressTest {
   @BeforeEach
   void setUp() {
     logPath = tempDir.toString();
+    LoggerFactory.setLogLevel(LogLevel.ERROR);
   }
 
   @Test
