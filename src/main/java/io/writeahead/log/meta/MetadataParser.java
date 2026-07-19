@@ -59,13 +59,22 @@ public class MetadataParser {
     int arrayEnd = json.indexOf("]", arrayStart);
     String arrayContent = json.substring(arrayStart + 1, arrayEnd);
 
-    String[] objectStrings = arrayContent.split("\\{");
-    for (int i = 1; i < objectStrings.length; i++) {
-      String objStr = "{" + objectStrings[i];
+    int pos = 0;
+    while (pos < arrayContent.length()) {
+      int objStart = arrayContent.indexOf("{", pos);
+      if (objStart == -1) break;
+
+      int objEnd = arrayContent.indexOf("}", objStart);
+      if (objEnd == -1) break;
+
+      String objStr = arrayContent.substring(objStart, objEnd + 1);
+
       String filename = extractString(objStr, "filename");
       long minTs = extractLong(objStr, "minTimestamp");
       long maxTs = extractLong(objStr, "maxTimestamp");
       segments.add(new SegmentMetadata(filename, minTs, maxTs));
+
+      pos = objEnd + 1;
     }
 
     return segments;

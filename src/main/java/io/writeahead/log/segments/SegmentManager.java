@@ -46,23 +46,23 @@ public class SegmentManager {
   }
 
   public void writeBatch(List<LogEntry> batch) throws IOException {
-    for (LogEntry logEntry : batch) {
-      byte[] entryBytes = logEntryToBytes(logEntry);
-      FileUtils.writeToStream(currentStream, entryBytes);
+      for (LogEntry logEntry : batch) {
+        byte[] entryBytes = logEntryToBytes(logEntry);
+        FileUtils.writeToStream(currentStream, entryBytes);
 
-      if (currentSegmentSize == 0) {
-        currentSegmentMinTimestamp = logEntry.timestamp();
+        if (currentSegmentSize == 0) {
+          currentSegmentMinTimestamp = logEntry.timestamp();
+        }
+
+        currentSegmentMaxTimestamp = logEntry.timestamp();
+        currentSegmentSize += entryBytes.length;
       }
 
-      currentSegmentMaxTimestamp = logEntry.timestamp();
-      currentSegmentSize += entryBytes.length;
-    }
+      //FileUtils.fsyncStream(currentStream);
 
-    FileUtils.fsyncStream(currentStream);
-
-    if (currentSegmentSize > MAX_SEGMENT_SIZE) {
-      rotateSegment();
-    }
+      if (currentSegmentSize > MAX_SEGMENT_SIZE) {
+        rotateSegment();
+      }
   }
 
   public List<LogEntry> readAllSegments() throws IOException {
@@ -98,7 +98,6 @@ public class SegmentManager {
           allEntries.add(new LogEntry(size, data, timestamp));
           entriesRead++;
         } catch (EOFException ex) {
-          System.err.println("Incomplete entry at end of " + logFile.getName());
           break;
         }
       }
@@ -156,7 +155,6 @@ public class SegmentManager {
           }
           entriesRead++;
         } catch (EOFException ex) {
-          System.err.println("Incomplete entry at end of " + segmentMetadata.filename());
           break;
         }
       }
