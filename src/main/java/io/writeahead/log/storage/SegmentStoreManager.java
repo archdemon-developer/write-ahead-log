@@ -2,8 +2,13 @@ package io.writeahead.log.storage;
 
 import io.writeahead.log.constants.WalConstants;
 import io.writeahead.log.exceptions.CorruptedEntryException;
+import io.writeahead.log.fsync.FsyncExecutor;
+import io.writeahead.log.fsync.FsyncRetryStrategy;
+import io.writeahead.log.fsync.factory.FsyncExecutorFactory;
+import io.writeahead.log.fsync.factory.FsyncRetryStrategyFactory;
 import io.writeahead.log.logging.Logger;
 import io.writeahead.log.logging.LoggerFactory;
+import io.writeahead.log.metrics.SimpleWalMetrics;
 import io.writeahead.log.models.*;
 import io.writeahead.log.utils.Crc32Utils;
 import io.writeahead.log.utils.FileUtils;
@@ -28,6 +33,10 @@ public class SegmentStoreManager implements SegmentStore {
   private long currentSegmentMinTimestamp;
   private long currentSegmentMaxTimestamp;
 
+  private FsyncExecutor fsyncExecutor;
+  private final FsyncRetryStrategy fsyncRetryStrategy;
+
+  private final SimpleWalMetrics metrics = new SimpleWalMetrics();
   private static final Logger log = LoggerFactory.getLogger(SegmentStoreManager.class);
 
   public SegmentStoreManager(WalConfiguration configuration, MetadataStore metadataStore)
@@ -44,8 +53,13 @@ public class SegmentStoreManager implements SegmentStore {
       currentSegmentSize = FileUtils.getFileSize(currentSegment);
       log.info("Opened existing segment: {}", currentSegment.getName());
     } else {
-      createNewSegment();
+      createNewSegment(walMetadata);
     }
+
+    metrics.setSegmentCount(walMetadata.segments().size());
+    this.fsyncRetryStrategy = FsyncRetryStrategyFactory.create(config, metrics);
+    this.fsyncExecutor =
+        FsyncExecutorFactory.create(config.fsyncStrategy(), fsyncRetryStrategy, currentStream);
   }
 
   @Override
@@ -64,9 +78,12 @@ public class SegmentStoreManager implements SegmentStore {
 
       currentSegmentMaxTimestamp = logEntry.timestamp();
       currentSegmentSize += entryBytes.length;
+
+      fsyncExecutor.onEntryWritten();
+      metrics.recordEntryWritten(logEntry.size());
     }
 
-    FileUtils.fsyncStream(currentStream);
+    fsyncExecutor.onBatchComplete();
 
     if (currentSegmentSize > config.segmentSizeBytes()) {
       rotateSegment();
@@ -98,6 +115,7 @@ public class SegmentStoreManager implements SegmentStore {
           long storedCrc = dataInputStream.readLong();
 
           if (computedCrc != storedCrc) {
+            metrics.recordCorruptedEntry();
             throw new CorruptedEntryException(
                 logFile.getName(),
                 allBytes.length - byteArrayInputStream.available(),
@@ -155,6 +173,7 @@ public class SegmentStoreManager implements SegmentStore {
           long storedCrc = dataInputStream.readLong();
 
           if (computedCrc != storedCrc) {
+            metrics.recordCorruptedEntry();
             throw new CorruptedEntryException(
                 segmentMetadata.filename(),
                 allBytes.length - byteArrayInputStream.available(),
@@ -228,7 +247,7 @@ public class SegmentStoreManager implements SegmentStore {
     FileUtils.closeStream(currentStream);
   }
 
-  private void createNewSegment() throws IOException {
+  private void createNewSegment(WalMetadata existingMetadata) throws IOException {
     String formattedTimestamp = formatTimestamp(Instant.now().toEpochMilli());
     String filename = "wal-" + formattedTimestamp + "-001.log";
 
@@ -239,8 +258,7 @@ public class SegmentStoreManager implements SegmentStore {
     this.currentSegmentMinTimestamp = 0;
     this.currentSegmentMaxTimestamp = 0;
 
-    WalMetadata old = metadataStore.read();
-    List<SegmentMetadata> allSegments = new ArrayList<>(old.segments());
+    List<SegmentMetadata> allSegments = new ArrayList<>(existingMetadata.segments());
     allSegments.add(new SegmentMetadata(filename, 0, 0));
 
     metadataStore.write(new WalMetadata(filename, allSegments));
@@ -264,9 +282,16 @@ public class SegmentStoreManager implements SegmentStore {
 
     allSegments.set(allSegments.size() - 1, updated);
 
-    metadataStore.write(new WalMetadata(oldWal.lastActiveSegment(), allSegments));
+    WalMetadata updatedWal = new WalMetadata(oldWal.lastActiveSegment(), allSegments);
+    metadataStore.write(updatedWal);
 
-    createNewSegment();
+    createNewSegment(updatedWal);
+
+    metrics.recordSegmentRotation();
+    metrics.setSegmentCount(updatedWal.segments().size());
+    this.fsyncExecutor =
+        FsyncExecutorFactory.create(config.fsyncStrategy(), fsyncRetryStrategy, currentStream);
+
     log.info("New segment created: {}", currentSegment.getName());
   }
 
@@ -301,4 +326,8 @@ public class SegmentStoreManager implements SegmentStore {
 
     return resultWithCrc;
   }
+
+  public SimpleWalMetrics getMetrics() {
+      return metrics;
+ }
 }

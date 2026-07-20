@@ -2,45 +2,15 @@ package io.writeahead.log.models;
 
 import io.writeahead.log.enums.FsyncStrategy;
 
-public class WalConfiguration {
-  private final int batchSize;
-  private final long segmentSizeBytes;
-  private final String logDir;
-  private final FsyncStrategy fsyncStrategy;
-  private final String timestampFormat;
-
-  public WalConfiguration(
-      int batchSize,
-      long segmentSizeBytes,
-      String logDir,
-      FsyncStrategy fsyncStrategy,
-      String timestampFormat) {
-    this.batchSize = batchSize;
-    this.segmentSizeBytes = segmentSizeBytes;
-    this.logDir = logDir;
-    this.fsyncStrategy = fsyncStrategy;
-    this.timestampFormat = timestampFormat;
-  }
-
-  public int batchSize() {
-    return batchSize;
-  }
-
-  public long segmentSizeBytes() {
-    return segmentSizeBytes;
-  }
-
-  public String logDir() {
-    return logDir;
-  }
-
-  public FsyncStrategy fsyncStrategy() {
-    return fsyncStrategy;
-  }
-
-  public String timestampFormat() {
-    return timestampFormat;
-  }
+public record WalConfiguration(
+    int batchSize,
+    long segmentSizeBytes,
+    String logDir,
+    FsyncStrategy fsyncStrategy,
+    String timestampFormat,
+    int maxRetries,
+    long retryBackoffMs,
+    double retryBackoffMultiplier) {
 
   public static class Builder {
     private int batchSize = 10;
@@ -48,6 +18,9 @@ public class WalConfiguration {
     private String logDir;
     private FsyncStrategy fsyncStrategy = FsyncStrategy.FSYNC_EVERY_BATCH;
     private String timestampFormat = "yyyy-MM-dd'T'HH:mm:ss.SSS";
+    private int maxRetries = 3;
+    private long retryBackoffMs = 10;
+    private double retryBackoffMultiplier = 5.0;
 
     public Builder batchSize(int size) {
       this.batchSize = size;
@@ -74,12 +47,34 @@ public class WalConfiguration {
       return this;
     }
 
+    public Builder maxRetries(int retries) {
+      this.maxRetries = retries;
+      return this;
+    }
+
+    public Builder retryBackoffMs(long backoffMs) {
+      this.retryBackoffMs = backoffMs;
+      return this;
+    }
+
+    public Builder retryBackoffMultiplier(double backoffMultiplier) {
+      this.retryBackoffMultiplier = backoffMultiplier;
+      return this;
+    }
+
     public WalConfiguration build() {
       if (logDir == null) {
         throw new IllegalArgumentException("logDir is required");
       }
       return new WalConfiguration(
-          batchSize, segmentSizeBytes, logDir, fsyncStrategy, timestampFormat);
+          batchSize,
+          segmentSizeBytes,
+          logDir,
+          fsyncStrategy,
+          timestampFormat,
+          maxRetries,
+          retryBackoffMs,
+          retryBackoffMultiplier);
     }
   }
 }

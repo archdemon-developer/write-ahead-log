@@ -2,6 +2,10 @@ package io.writeahead.log.utils;
 
 import io.writeahead.log.models.SegmentMetadata;
 import io.writeahead.log.models.WalMetadata;
+import java.io.ByteArrayInputStream;
+import java.io.DataInputStream;
+import java.io.EOFException;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -90,5 +94,32 @@ public class MetadataParserUtils {
     String numStr = json.substring(start, end).trim();
     numStr = numStr.split("\\s+")[0];
     return Long.parseLong(numStr);
+  }
+
+  public static long parseLastEntryTimestamp(byte[] buffer) throws IOException {
+    try (ByteArrayInputStream byteArrayInputStream = new ByteArrayInputStream(buffer);
+        DataInputStream dataInputStream = new DataInputStream(byteArrayInputStream)) {
+
+      long lastTimestamp = -1;
+
+      while (dataInputStream.available() > 0) {
+        try {
+          long timestamp = dataInputStream.readLong();
+          int size = dataInputStream.readInt();
+          byte[] data = new byte[size];
+          dataInputStream.readFully(data);
+          long crc = dataInputStream.readLong();
+          lastTimestamp = timestamp;
+        } catch (EOFException e) {
+          break;
+        }
+      }
+
+      if (lastTimestamp == -1) {
+        throw new IOException("No valid entries found in file");
+      }
+
+      return lastTimestamp;
+    }
   }
 }

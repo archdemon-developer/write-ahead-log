@@ -3,6 +3,9 @@ package io.writeahead.log;
 import io.writeahead.log.concurrency.LockableOperation;
 import io.writeahead.log.logging.Logger;
 import io.writeahead.log.logging.LoggerFactory;
+import io.writeahead.log.metrics.SimpleWalMetrics;
+import io.writeahead.log.metrics.WalMetrics;
+import io.writeahead.log.metrics.WalPerformanceMetrics;
 import io.writeahead.log.models.LogEntry;
 import io.writeahead.log.models.WalConfiguration;
 import io.writeahead.log.storage.MetaDataStoreManager;
@@ -19,18 +22,16 @@ public class WriteAheadLog {
   private final List<LogEntry> batch;
   private final SegmentStore segmentStore;
   private final LockableOperation appendLock;
-  private final WalConfiguration config;
 
   private static final Logger log = LoggerFactory.getLogger(WriteAheadLog.class);
 
   public WriteAheadLog(WalConfiguration walConfiguration) throws IOException {
-    this.config = walConfiguration;
-    this.batchSize = config.batchSize();
+    this.batchSize = walConfiguration.batchSize();
     this.batch = new ArrayList<>();
-    this.segmentStore = new SegmentStoreManager(config, new MetaDataStoreManager(config));
+    this.segmentStore = new SegmentStoreManager(walConfiguration, new MetaDataStoreManager(walConfiguration));
     this.appendLock = new LockableOperation();
 
-    log.info("WriteAheadLog initialized: batchSize={}, logDir={}", batchSize, config.logDir());
+    log.info("WriteAheadLog initialized: batchSize={}, logDir={}", batchSize, walConfiguration.logDir());
   }
 
   public void append(LogEntry entry) throws IOException {
@@ -101,4 +102,12 @@ public class WriteAheadLog {
           return null;
         });
   }
+
+    public WalMetrics getMetrics() {
+        return segmentStore.getMetrics();
+    }
+
+    public WalPerformanceMetrics getPerformanceMetrics() {
+        return segmentStore.getMetrics();
+    }
 }
