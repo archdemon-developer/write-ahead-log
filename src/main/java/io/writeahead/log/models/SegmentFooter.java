@@ -1,5 +1,6 @@
 package io.writeahead.log.models;
 
+import io.writeahead.log.constants.WalConstants;
 import io.writeahead.log.utils.Crc32Utils;
 
 import java.io.*;
@@ -12,7 +13,7 @@ public record SegmentFooter(
         long checksum) {
 
     private static final long COMPLETE_MARKER = 0xDEADBEEFL;
-    private static final int FOOTER_SIZE = 36;
+    private static final int FOOTER_SIZE = WalConstants.SEGMENT_FOOTER_SIZE;
 
     public static SegmentFooter create(int entryCount, long minTimestamp, long maxTimestamp) throws IOException {
         long checksum = calculateChecksum(entryCount, minTimestamp, maxTimestamp, COMPLETE_MARKER);

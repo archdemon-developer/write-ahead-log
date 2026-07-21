@@ -1,10 +1,9 @@
 package io.writeahead.log.utils;
 
+import io.writeahead.log.constants.WalConstants;
 import io.writeahead.log.models.FileStream;
-import java.io.DataOutputStream;
-import java.io.File;
-import java.io.FileOutputStream;
-import java.io.IOException;
+
+import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -86,6 +85,44 @@ public class FileUtils {
     }
 
     return new ArrayList<>();
+  }
+
+  public static byte[] readSegmentHeader(File file) throws IOException {
+    return readFirstNBytes(file, WalConstants.SEGMENT_HEADER_SIZE);
+  }
+
+  public static byte[] readSegmentFooter(File file) throws IOException {
+    return readLastNBytes(file, WalConstants.SEGMENT_FOOTER_SIZE);
+  }
+
+  private static byte[] readFirstNBytes(File file, int n) throws IOException {
+    long fileSize = file.length();
+
+    if (fileSize < n) {
+      throw new IOException("File too small: " + fileSize + " < " + n);
+    }
+
+    try (RandomAccessFile randomAccessFile = new RandomAccessFile(file, "r")) {
+      byte[] buffer = new byte[n];
+      randomAccessFile.seek(0);
+      randomAccessFile.readFully(buffer);
+      return buffer;
+    }
+  }
+
+  private static byte[] readLastNBytes(File file, int n) throws IOException {
+    long fileSize = file.length();
+
+    if (fileSize < n) {
+      throw new IOException("File too small: " + fileSize + " < " + n);
+    }
+
+    try (RandomAccessFile randomAccessFile = new RandomAccessFile(file, "r")) {
+      byte[] buffer = new byte[n];
+      randomAccessFile.seek(fileSize - n);
+      randomAccessFile.readFully(buffer);
+      return buffer;
+    }
   }
 
   private static String getFileExtension(File file) {

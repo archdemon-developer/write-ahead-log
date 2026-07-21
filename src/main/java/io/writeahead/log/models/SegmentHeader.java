@@ -1,5 +1,6 @@
 package io.writeahead.log.models;
 
+import io.writeahead.log.constants.WalConstants;
 import io.writeahead.log.utils.Crc32Utils;
 
 import java.io.*;
@@ -14,7 +15,7 @@ public record SegmentHeader(
 
     private static final byte MAGIC_BYTE = (byte) 0xAA;
     private static final byte VERSION = 0x01;
-    private static final int HEADER_SIZE = 48;
+    private static final int HEADER_SIZE = WalConstants.SEGMENT_HEADER_SIZE;
     private static final int RESERVED_BYTE_SIZE = 22;
 
     public static SegmentHeader create(long createdAt, long segmentSequence) throws IOException {
