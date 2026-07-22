@@ -2,7 +2,7 @@ package io.writeahead.log.fsync.executor;
 
 import io.writeahead.log.fsync.FsyncExecutor;
 import io.writeahead.log.fsync.FsyncRetryStrategy;
-import io.writeahead.log.models.FileStream;
+import io.writeahead.log.models.file.FileStream;
 import io.writeahead.log.utils.FileUtils;
 import java.io.IOException;
 

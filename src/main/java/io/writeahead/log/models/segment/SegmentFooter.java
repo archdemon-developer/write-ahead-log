@@ -1,4 +1,4 @@
-package io.writeahead.log.models;
+package io.writeahead.log.models.segment;
 
 import io.writeahead.log.constants.WalConstants;
 import io.writeahead.log.utils.Crc32Utils;
@@ -51,6 +51,7 @@ public record SegmentFooter(
     public boolean isValid() {
         try {
             long computedChecksum = calculateChecksum(entryCount, minTimestamp, maxTimestamp, completeMarker);
+            System.err.println("Footer validation: computed=" + computedChecksum + ", stored=" + checksum + ", valid=" + (computedChecksum == checksum));
             return computedChecksum == checksum;
         } catch (IOException e) {
             return false;

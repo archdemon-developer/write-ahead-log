@@ -7,7 +7,7 @@ public class SimpleWalMetrics implements WalMetrics, WalPerformanceMetrics {
 
   private final AtomicLong entriesWritten = new AtomicLong(0);
   private final AtomicLong bytesWritten = new AtomicLong(0);
-  private final AtomicInteger segmentCount = new AtomicInteger(0);
+  private final AtomicLong segmentCount = new AtomicLong(0);
   private final AtomicLong corruptedEntriesDetected = new AtomicLong(0);
   private final AtomicLong lastRotationTimeMs = new AtomicLong(0);
 
@@ -35,7 +35,7 @@ public class SimpleWalMetrics implements WalMetrics, WalPerformanceMetrics {
     lastRotationTimeMs.set(System.currentTimeMillis());
   }
 
-  public void setSegmentCount(int count) {
+  public void setSegmentCount(long count) {
     segmentCount.set(count);
   }
 
@@ -50,7 +50,7 @@ public class SimpleWalMetrics implements WalMetrics, WalPerformanceMetrics {
   }
 
   @Override
-  public int getSegmentCount() {
+  public long getSegmentCount() {
     return segmentCount.get();
   }
 

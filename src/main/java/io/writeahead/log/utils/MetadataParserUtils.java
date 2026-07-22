@@ -1,7 +1,7 @@
 package io.writeahead.log.utils;
 
-import io.writeahead.log.models.SegmentMetadata;
-import io.writeahead.log.models.WalMetadata;
+import io.writeahead.log.models.segment.SegmentMetadata;
+import io.writeahead.log.models.wal.WalMetadata;
 import java.io.ByteArrayInputStream;
 import java.io.DataInputStream;
 import java.io.EOFException;

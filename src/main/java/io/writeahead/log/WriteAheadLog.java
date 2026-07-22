@@ -3,12 +3,10 @@ package io.writeahead.log;
 import io.writeahead.log.concurrency.LockableOperation;
 import io.writeahead.log.logging.Logger;
 import io.writeahead.log.logging.LoggerFactory;
-import io.writeahead.log.metrics.SimpleWalMetrics;
 import io.writeahead.log.metrics.WalMetrics;
 import io.writeahead.log.metrics.WalPerformanceMetrics;
 import io.writeahead.log.models.LogEntry;
-import io.writeahead.log.models.WalConfiguration;
-import io.writeahead.log.storage.MetaDataStoreManager;
+import io.writeahead.log.models.wal.WalConfiguration;
 import io.writeahead.log.storage.SegmentStore;
 import io.writeahead.log.storage.SegmentStoreManager;
 import java.io.IOException;
@@ -28,7 +26,7 @@ public class WriteAheadLog {
   public WriteAheadLog(WalConfiguration walConfiguration) throws IOException {
     this.batchSize = walConfiguration.batchSize();
     this.batch = new ArrayList<>();
-    this.segmentStore = new SegmentStoreManager(walConfiguration, new MetaDataStoreManager(walConfiguration));
+    this.segmentStore = new SegmentStoreManager(walConfiguration);
     this.appendLock = new LockableOperation();
 
     log.info("WriteAheadLog initialized: batchSize={}, logDir={}", batchSize, walConfiguration.logDir());

@@ -1,7 +1,7 @@
 package io.writeahead.log.utils;
 
 import io.writeahead.log.constants.WalConstants;
-import io.writeahead.log.models.FileStream;
+import io.writeahead.log.models.file.FileStream;
 
 import java.io.*;
 import java.nio.file.Files;

@@ -3,7 +3,7 @@ package io.writeahead.log.fsync.factory;
 import io.writeahead.log.fsync.FsyncRetryStrategy;
 import io.writeahead.log.fsync.retry.ExponentialBackoffRetryStrategy;
 import io.writeahead.log.metrics.SimpleWalMetrics;
-import io.writeahead.log.models.WalConfiguration;
+import io.writeahead.log.models.wal.WalConfiguration;
 
 public class FsyncRetryStrategyFactory {
 

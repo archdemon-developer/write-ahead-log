@@ -5,7 +5,7 @@ import io.writeahead.log.fsync.FsyncExecutor;
 import io.writeahead.log.fsync.FsyncRetryStrategy;
 import io.writeahead.log.fsync.executor.EveryBatchFsyncExecutor;
 import io.writeahead.log.fsync.executor.EveryEntryFsyncExecutor;
-import io.writeahead.log.models.FileStream;
+import io.writeahead.log.models.file.FileStream;
 
 public class FsyncExecutorFactory {
 

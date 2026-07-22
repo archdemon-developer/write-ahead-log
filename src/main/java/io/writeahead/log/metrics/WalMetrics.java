@@ -5,7 +5,7 @@ public interface WalMetrics {
 
   long getBytesWritten();
 
-  int getSegmentCount();
+  long getSegmentCount();
 
   long getCorruptedEntriesDetected();
 

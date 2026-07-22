@@ -1,4 +1,4 @@
-package io.writeahead.log.models;
+package io.writeahead.log.models.wal;
 
 import io.writeahead.log.enums.FsyncStrategy;
 

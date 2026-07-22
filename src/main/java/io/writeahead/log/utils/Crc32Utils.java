@@ -1,5 +1,7 @@
 package io.writeahead.log.utils;
 
+import io.writeahead.log.serdes.EntrySerdes;
+
 import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
@@ -19,19 +21,8 @@ public class Crc32Utils {
     return crc32.getValue();
   }
 
-  public static long compute(long timestamp, int size, byte[] data) throws IOException {
-    ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
-    DataOutputStream dataOutputStream = new DataOutputStream(byteArrayOutputStream);
-
-    dataOutputStream.writeLong(timestamp);
-    dataOutputStream.writeInt(size);
-    dataOutputStream.write(data);
-
-    byte[] serialized = byteArrayOutputStream.toByteArray();
-
-    byteArrayOutputStream.close();
-    dataOutputStream.close();
-
+  public static long computeEntryCrc(long timestamp, int size, byte[] data) throws IOException {
+    byte[] serialized = EntrySerdes.serializeEntrySanseCrc(timestamp, size, data);
     return compute(serialized);
   }
 }

@@ -2,9 +2,9 @@ package io.writeahead.log.storage;
 
 import io.writeahead.log.logging.Logger;
 import io.writeahead.log.logging.LoggerFactory;
-import io.writeahead.log.models.SegmentMetadata;
-import io.writeahead.log.models.WalConfiguration;
-import io.writeahead.log.models.WalMetadata;
+import io.writeahead.log.models.segment.SegmentMetadata;
+import io.writeahead.log.models.wal.WalConfiguration;
+import io.writeahead.log.models.wal.WalMetadata;
 import io.writeahead.log.utils.FileUtils;
 import io.writeahead.log.utils.MetadataParserUtils;
 import java.io.*;

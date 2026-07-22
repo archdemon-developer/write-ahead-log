@@ -59,6 +59,13 @@ public class SimpleLogger implements Logger {
   }
 
   @Override
+  public void error(String message, Object... args) {
+    if (minLevel.isEnabledFor(LogLevel.ERROR)) {
+      print(LogLevel.ERROR, format(message, args), null);
+    }
+  }
+
+  @Override
   public void error(String message) {
     if (minLevel.isEnabledFor(LogLevel.ERROR)) {
       print(LogLevel.ERROR, message, null);
