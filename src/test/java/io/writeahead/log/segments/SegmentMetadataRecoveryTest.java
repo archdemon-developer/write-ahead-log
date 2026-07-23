@@ -23,7 +23,7 @@ public class SegmentMetadataRecoveryTest {
     @BeforeEach
     void setUp() throws IOException {
         tempDir = Files.createTempDirectory("wal-recovery-test-");
-        recovery = new SegmentMetadataRecovery();
+        recovery = new SegmentMetadataRecovery(tempDir.toString());
     }
 
     @AfterEach
@@ -41,7 +41,7 @@ public class SegmentMetadataRecoveryTest {
 
     @Test
     void testRecoverEmptyDirectory() throws IOException {
-        WalMetadata metadata = recovery.recover(tempDir.toString());
+        WalMetadata metadata = recovery.recover();
 
         assertEquals(0, metadata.segments().size(), "Should have no segments");
         assertEquals(1, metadata.nextSequence(), "Next sequence should be 1 (fresh start)");
@@ -51,7 +51,8 @@ public class SegmentMetadataRecoveryTest {
     @Test
     void testRecoverNonExistentDirectory() throws IOException {
         String nonExistent = "/tmp/does-not-exist-" + System.currentTimeMillis();
-        WalMetadata metadata = recovery.recover(nonExistent);
+        SegmentMetadataRecovery recoveryNonExistent = new SegmentMetadataRecovery(nonExistent);
+        WalMetadata metadata = recoveryNonExistent.recover();
 
         assertEquals(0, metadata.segments().size(), "Should handle missing directory");
         assertEquals(1, metadata.nextSequence(), "Next sequence should default to 1");
@@ -62,7 +63,7 @@ public class SegmentMetadataRecoveryTest {
         File segment = new File(tempDir.toFile(), "wal-2026-07-23-001.log");
         createValidSegmentFile(segment, 1, 1000L, 5000L, 100);
 
-        WalMetadata metadata = recovery.recover(tempDir.toString());
+        WalMetadata metadata = recovery.recover();
 
         assertEquals(1, metadata.segments().size(), "Should recover 1 segment");
         assertEquals(2, metadata.nextSequence(), "Next sequence should be 2");
@@ -81,7 +82,7 @@ public class SegmentMetadataRecoveryTest {
         createValidSegmentFile(new File(tempDir.toFile(), "wal-002.log"), 2, 3000L, 4000L, 20);
         createValidSegmentFile(new File(tempDir.toFile(), "wal-003.log"), 3, 5000L, 6000L, 30);
 
-        WalMetadata metadata = recovery.recover(tempDir.toString());
+        WalMetadata metadata = recovery.recover();
 
         assertEquals(3, metadata.segments().size(), "Should recover 3 segments");
         assertEquals(4, metadata.nextSequence(), "Next sequence should be 4");
@@ -96,7 +97,7 @@ public class SegmentMetadataRecoveryTest {
         File corrupted = new File(tempDir.toFile(), "wal-002.log");
         createSegmentFileWithCorruptedHeader(corrupted, 2);
 
-        WalMetadata metadata = recovery.recover(tempDir.toString());
+        WalMetadata metadata = recovery.recover();
 
         assertEquals(1, metadata.segments().size(), "Should skip corrupted segment, recover 1");
         assertEquals(2, metadata.nextSequence(), "Next sequence based on valid segment only");
@@ -110,7 +111,7 @@ public class SegmentMetadataRecoveryTest {
         File corrupted = new File(tempDir.toFile(), "wal-002.log");
         createSegmentFileWithCorruptedFooter(corrupted, 2);
 
-        WalMetadata metadata = recovery.recover(tempDir.toString());
+        WalMetadata metadata = recovery.recover();
 
         assertEquals(1, metadata.segments().size(), "Should skip footer corruption via CRC");
         assertEquals(2, metadata.nextSequence(), "Next sequence based on valid segment only");
@@ -124,7 +125,7 @@ public class SegmentMetadataRecoveryTest {
         File tooSmall = new File(tempDir.toFile(), "wal-002.log");
         Files.write(tooSmall.toPath(), new byte[50]);
 
-        WalMetadata metadata = recovery.recover(tempDir.toString());
+        WalMetadata metadata = recovery.recover();
 
         assertEquals(1, metadata.segments().size(), "Should skip too-small file");
     }
@@ -135,7 +136,7 @@ public class SegmentMetadataRecoveryTest {
         createValidSegmentFile(new File(tempDir.toFile(), "wal-005.log"), 5, 3000L, 4000L, 20);
         createValidSegmentFile(new File(tempDir.toFile(), "wal-003.log"), 3, 5000L, 6000L, 30);
 
-        WalMetadata metadata = recovery.recover(tempDir.toString());
+        WalMetadata metadata = recovery.recover();
 
         assertEquals(3, metadata.segments().size(), "Should recover all 3");
         assertEquals(6, metadata.nextSequence(), "Next sequence should be 5 + 1 (max + 1)");
@@ -145,7 +146,7 @@ public class SegmentMetadataRecoveryTest {
     void testRecoverPreventsDuplicateSequences() throws IOException {
         createValidSegmentFile(new File(tempDir.toFile(), "wal-001.log"), 5, 1000L, 2000L, 10);
 
-        WalMetadata metadata = recovery.recover(tempDir.toString());
+        WalMetadata metadata = recovery.recover();
 
         assertEquals(6, metadata.nextSequence(), "Next sequence should prevent duplicates");
     }
@@ -156,7 +157,7 @@ public class SegmentMetadataRecoveryTest {
         createValidSegmentFile(new File(tempDir.toFile(), "wal-001.log"), 1, 1000L, 2000L, 10);
         createValidSegmentFile(new File(tempDir.toFile(), "wal-002.log"), 2, 3000L, 4000L, 20);
 
-        WalMetadata metadata = recovery.recover(tempDir.toString());
+        WalMetadata metadata = recovery.recover();
 
         assertEquals(3, metadata.segments().size(), "Should recover all 3");
         assertEquals(1, metadata.segments().get(0).sequenceNumber(), "First should be seq 1");
@@ -172,7 +173,7 @@ public class SegmentMetadataRecoveryTest {
         createSegmentFileWithCorruptedFooter(new File(tempDir.toFile(), "wal-004.log"), 4);
         createValidSegmentFile(new File(tempDir.toFile(), "wal-005.log"), 5, 5000L, 6000L, 30);
 
-        WalMetadata metadata = recovery.recover(tempDir.toString());
+        WalMetadata metadata = recovery.recover();
 
         assertEquals(3, metadata.segments().size(), "Should recover only 3 valid segments");
         assertEquals(6, metadata.nextSequence(), "Next sequence based on max (5) + 1");
@@ -188,7 +189,7 @@ public class SegmentMetadataRecoveryTest {
         File corruptedMarker = new File(tempDir.toFile(), "wal-002.log");
         createSegmentFileWithCorruptedMarker(corruptedMarker, 2);
 
-        WalMetadata metadata = recovery.recover(tempDir.toString());
+        WalMetadata metadata = recovery.recover();
 
         assertEquals(1, metadata.segments().size(), "Should skip segment with corrupted marker");
     }

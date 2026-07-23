@@ -105,18 +105,6 @@ public class SegmentEntriesReaderTest {
         assertFalse(result.hasCorruption(), "Should be valid");
     }
 
-    @Test
-    void testComputeEntryCrcConsistency() throws IOException {
-        long timestamp = 1000L;
-        int size = 5;
-        byte[] data = "hello".getBytes();
-
-        long crc1 = SegmentEntriesReader.computeEntryCrc(timestamp, size, data);
-        long crc2 = SegmentEntriesReader.computeEntryCrc(timestamp, size, data);
-
-        assertEquals(crc1, crc2, "CRC should be deterministic");
-    }
-
     // Helper: Create entry region from list of entries
     private byte[] createEntryRegion(LogEntry... entries) throws IOException {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();

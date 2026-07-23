@@ -18,8 +18,12 @@ import java.util.List;
 public class SegmentMetadataRecovery {
 
     private static final Logger log = LoggerFactory.getLogger(SegmentMetadataRecovery.class);
+    private final String logDir;
 
-    public WalMetadata recover(String logDir) throws IOException {
+    public SegmentMetadataRecovery(String logDir) {
+        this.logDir = logDir;
+    }
+    public WalMetadata recover() throws IOException {
         List<SegmentMetadata> segments = new ArrayList<>();
         long maxSequenceFromHeaders = 0;
 

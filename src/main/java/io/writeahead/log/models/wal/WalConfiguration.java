@@ -4,7 +4,7 @@ import io.writeahead.log.enums.FsyncStrategy;
 
 public record WalConfiguration(
     int batchSize,
-    long segmentSizeBytes,
+    long maxSegmentSize,
     String logDir,
     FsyncStrategy fsyncStrategy,
     String timestampFormat,
@@ -14,7 +14,7 @@ public record WalConfiguration(
 
   public static class Builder {
     private int batchSize = 10;
-    private long segmentSizeBytes = 10 * 1024 * 1024;
+    private long maxSegmentSize = 10 * 1024 * 1024;
     private String logDir;
     private FsyncStrategy fsyncStrategy = FsyncStrategy.FSYNC_EVERY_BATCH;
     private String timestampFormat = "yyyy-MM-dd'T'HH:mm:ss.SSS";
@@ -27,8 +27,8 @@ public record WalConfiguration(
       return this;
     }
 
-    public Builder segmentSizeBytes(long size) {
-      this.segmentSizeBytes = size;
+    public Builder maxSegmentSize(long size) {
+      this.maxSegmentSize = size;
       return this;
     }
 
@@ -68,7 +68,7 @@ public record WalConfiguration(
       }
       return new WalConfiguration(
           batchSize,
-          segmentSizeBytes,
+          maxSegmentSize,
           logDir,
           fsyncStrategy,
           timestampFormat,
