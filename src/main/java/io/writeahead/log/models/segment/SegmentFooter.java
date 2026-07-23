@@ -9,15 +9,14 @@ public record SegmentFooter(
         int entryCount,
         long minTimestamp,
         long maxTimestamp,
-        long completeMarker,
         long checksum) {
 
     private static final long COMPLETE_MARKER = 0xDEADBEEFL;
     private static final int FOOTER_SIZE = WalConstants.SEGMENT_FOOTER_SIZE;
 
     public static SegmentFooter create(int entryCount, long minTimestamp, long maxTimestamp) throws IOException {
-        long checksum = calculateChecksum(entryCount, minTimestamp, maxTimestamp, COMPLETE_MARKER);
-        return new SegmentFooter(entryCount, minTimestamp, maxTimestamp, COMPLETE_MARKER, checksum);
+        long checksum = calculateChecksum(entryCount, minTimestamp, maxTimestamp);
+        return new SegmentFooter(entryCount, minTimestamp, maxTimestamp, checksum);
     }
 
     public byte[] toBytes() throws IOException {
@@ -26,7 +25,6 @@ public record SegmentFooter(
             dataOutputStream.writeInt(entryCount);
             dataOutputStream.writeLong(minTimestamp);
             dataOutputStream.writeLong(maxTimestamp);
-            dataOutputStream.writeLong(completeMarker);
             dataOutputStream.writeLong(checksum);
             return byteArrayOutputStream.toByteArray();
         }
@@ -42,33 +40,26 @@ public record SegmentFooter(
             int entryCount = dataInputStream.readInt();
             long minTimestamp = dataInputStream.readLong();
             long maxTimestamp = dataInputStream.readLong();
-            long completeMarker = dataInputStream.readLong();
             long checksum = dataInputStream.readLong();
-            return new SegmentFooter(entryCount, minTimestamp, maxTimestamp, completeMarker, checksum);
+            return new SegmentFooter(entryCount, minTimestamp, maxTimestamp, checksum);
         }
     }
 
     public boolean isValid() {
         try {
-            long computedChecksum = calculateChecksum(entryCount, minTimestamp, maxTimestamp, completeMarker);
-            System.err.println("Footer validation: computed=" + computedChecksum + ", stored=" + checksum + ", valid=" + (computedChecksum == checksum));
+            long computedChecksum = calculateChecksum(entryCount, minTimestamp, maxTimestamp);
             return computedChecksum == checksum;
         } catch (IOException e) {
             return false;
         }
     }
 
-    public boolean isComplete() {
-        return completeMarker == COMPLETE_MARKER;
-    }
-
-    private static long calculateChecksum(int entryCount, long minTimestamp, long maxTimestamp, long completeMarker) throws IOException {
+    private static long calculateChecksum(int entryCount, long minTimestamp, long maxTimestamp) throws IOException {
         try (ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
              DataOutputStream dataOutputStream = new DataOutputStream(byteArrayOutputStream)) {
             dataOutputStream.writeInt(entryCount);
             dataOutputStream.writeLong(minTimestamp);
             dataOutputStream.writeLong(maxTimestamp);
-            dataOutputStream.writeLong(completeMarker);
             byte[] dataToCheck = byteArrayOutputStream.toByteArray();
             return Crc32Utils.compute(dataToCheck);
         }
@@ -80,10 +71,8 @@ public record SegmentFooter(
                 + "entryCount=" + entryCount
                 + ", minTimestamp=" + minTimestamp
                 + ", maxTimestamp=" + maxTimestamp
-                + ", completeMarker=0x" + String.format("%016X", completeMarker)
                 + ", checksum=" + checksum
                 + ", valid=" + isValid()
-                + ", complete=" + isComplete()
                 + '}';
     }
 

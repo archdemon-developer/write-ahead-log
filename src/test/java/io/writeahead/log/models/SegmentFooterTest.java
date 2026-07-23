@@ -21,9 +21,7 @@ public class SegmentFooterTest {
         assertEquals(entryCount, footer.entryCount(), "Entry count should match");
         assertEquals(minTs, footer.minTimestamp(), "Min timestamp should match");
         assertEquals(maxTs, footer.maxTimestamp(), "Max timestamp should match");
-        assertEquals(0xDEADBEEFL, footer.completeMarker(), "Complete marker should be 0xDEADBEEF");
         assertTrue(footer.isValid(), "Footer should be valid");
-        assertTrue(footer.isComplete(), "Footer should be marked complete");
     }
 
     @Test
@@ -42,16 +40,8 @@ public class SegmentFooterTest {
         assertEquals(original.entryCount(), deserialized.entryCount(), "Entry count should match");
         assertEquals(original.minTimestamp(), deserialized.minTimestamp(), "Min timestamp should match");
         assertEquals(original.maxTimestamp(), deserialized.maxTimestamp(), "Max timestamp should match");
-        assertEquals(original.completeMarker(), deserialized.completeMarker(), "Complete marker should match");
         assertEquals(original.checksum(), deserialized.checksum(), "Checksum should match");
         assertTrue(deserialized.isValid(), "Deserialized footer should be valid");
-        assertTrue(deserialized.isComplete(), "Deserialized footer should be complete");
-    }
-
-    @Test
-    void testCompleteMarkerPresent() throws Exception {
-        SegmentFooter footer = SegmentFooter.create(100, 1000L, 2000L);
-        assertTrue(footer.isComplete(), "Footer with 0xDEADBEEF should be complete");
     }
 
     @Test
@@ -63,7 +53,6 @@ public class SegmentFooterTest {
         bytes[20] = (byte) ~bytes[20];
 
         SegmentFooter corrupted = SegmentFooter.fromBytes(bytes);
-        assertFalse(corrupted.isComplete(), "Footer with corrupted marker should not be complete");
         assertFalse(corrupted.isValid(), "Footer with corrupted marker should fail checksum");
     }
 
@@ -73,7 +62,7 @@ public class SegmentFooterTest {
         byte[] bytes = footer.toBytes();
 
         // Corrupt checksum (last 8 bytes)
-        bytes[35] = (byte) ~bytes[35];
+        bytes[27] = (byte) ~bytes[27];
 
         SegmentFooter corrupted = SegmentFooter.fromBytes(bytes);
         assertFalse(corrupted.isValid(), "Footer with corrupted checksum should be invalid");
@@ -87,7 +76,6 @@ public class SegmentFooterTest {
 
         assertEquals(0, deserialized.entryCount(), "Zero entries should be valid");
         assertTrue(deserialized.isValid(), "Footer with 0 entries should be valid");
-        assertTrue(deserialized.isComplete(), "Footer with 0 entries should be complete");
     }
 
     @Test
@@ -164,9 +152,7 @@ public class SegmentFooterTest {
         assertTrue(str.contains("entryCount"), "toString should contain entryCount");
         assertTrue(str.contains("minTimestamp"), "toString should contain minTimestamp");
         assertTrue(str.contains("maxTimestamp"), "toString should contain maxTimestamp");
-        assertTrue(str.contains("completeMarker"), "toString should contain completeMarker");
         assertTrue(str.contains("valid"), "toString should contain validation status");
-        assertTrue(str.contains("complete"), "toString should contain completion status");
     }
 
     @Test
@@ -189,8 +175,6 @@ public class SegmentFooterTest {
 
         assertTrue(d1.isValid() && d2.isValid() && d3.isValid(),
                 "All footers should be valid");
-        assertTrue(d1.isComplete() && d2.isComplete() && d3.isComplete(),
-                "All footers should be complete");
     }
 
     @Test

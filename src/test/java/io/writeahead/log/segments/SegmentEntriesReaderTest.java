@@ -11,16 +11,16 @@ import io.writeahead.log.serdes.EntrySerdes;
 import io.writeahead.log.utils.Crc32Utils;
 import org.junit.jupiter.api.Test;
 
-public class SegmentReaderTest {
+public class SegmentEntriesReaderTest {
 
-    private final SegmentReader reader = new SegmentReader();
+    private final SegmentEntriesReader reader = new SegmentEntriesReader();
 
     @Test
     void testReadSingleEntry() throws IOException {
         byte[] entryRegion = createEntryRegion(
                 new LogEntry(5, "hello".getBytes(), 1000L));
 
-        SegmentReader.SegmentReadResult result = reader.readEntriesFromRegion(entryRegion);
+        SegmentEntriesReader.SegmentReadResult result = reader.readEntriesFromRegion(entryRegion);
 
         assertEquals(1, result.entriesRead(), "Should read 1 entry");
         assertEquals(1, result.entries().size(), "Should have 1 entry");
@@ -35,7 +35,7 @@ public class SegmentReaderTest {
                 new LogEntry(2, "e2".getBytes(), 2000L),
                 new LogEntry(2, "e3".getBytes(), 3000L));
 
-        SegmentReader.SegmentReadResult result = reader.readEntriesFromRegion(entryRegion);
+        SegmentEntriesReader.SegmentReadResult result = reader.readEntriesFromRegion(entryRegion);
 
         assertEquals(3, result.entriesRead(), "Should read 3 entries");
         assertEquals(3, result.entries().size(), "Should have 3 entries");
@@ -50,7 +50,7 @@ public class SegmentReaderTest {
         // Corrupt the CRC (last 8 bytes)
         entryRegion[entryRegion.length - 1] = (byte) ~entryRegion[entryRegion.length - 1];
 
-        SegmentReader.SegmentReadResult result = reader.readEntriesFromRegion(entryRegion);
+        SegmentEntriesReader.SegmentReadResult result = reader.readEntriesFromRegion(entryRegion);
 
         assertEquals(0, result.entries().size(), "Should not return corrupted entry");
         assertTrue(result.hasCorruption(), "Should detect corruption");
@@ -71,7 +71,7 @@ public class SegmentReaderTest {
         entryRegion[secondEntryCrcPos + 1] = (byte) ~entryRegion[secondEntryCrcPos + 1];
         entryRegion[secondEntryCrcPos] = (byte) ~entryRegion[secondEntryCrcPos];
 
-        SegmentReader.SegmentReadResult result = reader.readEntriesFromRegion(entryRegion);
+        SegmentEntriesReader.SegmentReadResult result = reader.readEntriesFromRegion(entryRegion);
 
         assertEquals(1, result.entries().size(), "Should have read only 1 entry before corruption");
         assertTrue(result.hasCorruption(), "Should detect corruption");
@@ -82,7 +82,7 @@ public class SegmentReaderTest {
     void testEmptyEntryRegion() throws IOException {
         byte[] entryRegion = new byte[0];
 
-        SegmentReader.SegmentReadResult result = reader.readEntriesFromRegion(entryRegion);
+        SegmentEntriesReader.SegmentReadResult result = reader.readEntriesFromRegion(entryRegion);
 
         assertEquals(0, result.entries().size(), "Should return empty list");
         assertFalse(result.hasCorruption(), "Empty is not corruption");
@@ -98,7 +98,7 @@ public class SegmentReaderTest {
         byte[] entryRegion = createEntryRegion(
                 new LogEntry(largeData.length, largeData, 1000L));
 
-        SegmentReader.SegmentReadResult result = reader.readEntriesFromRegion(entryRegion);
+        SegmentEntriesReader.SegmentReadResult result = reader.readEntriesFromRegion(entryRegion);
 
         assertEquals(1, result.entries().size(), "Should read large entry");
         assertEquals(largeData.length, result.entries().getFirst().size(), "Size should match");
@@ -111,8 +111,8 @@ public class SegmentReaderTest {
         int size = 5;
         byte[] data = "hello".getBytes();
 
-        long crc1 = SegmentReader.computeEntryCrc(timestamp, size, data);
-        long crc2 = SegmentReader.computeEntryCrc(timestamp, size, data);
+        long crc1 = SegmentEntriesReader.computeEntryCrc(timestamp, size, data);
+        long crc2 = SegmentEntriesReader.computeEntryCrc(timestamp, size, data);
 
         assertEquals(crc1, crc2, "CRC should be deterministic");
     }

@@ -1,6 +1,5 @@
 package io.writeahead.log.utils;
 
-import io.writeahead.log.constants.WalConstants;
 import io.writeahead.log.models.file.FileStream;
 
 import java.io.*;
@@ -87,42 +86,16 @@ public class FileUtils {
     return new ArrayList<>();
   }
 
-  public static byte[] readSegmentHeader(File file) throws IOException {
-    return readFirstNBytes(file, WalConstants.SEGMENT_HEADER_SIZE);
-  }
-
-  public static byte[] readSegmentFooter(File file) throws IOException {
-    return readLastNBytes(file, WalConstants.SEGMENT_FOOTER_SIZE);
-  }
-
-  private static byte[] readFirstNBytes(File file, int n) throws IOException {
-    long fileSize = file.length();
-
-    if (fileSize < n) {
-      throw new IOException("File too small: " + fileSize + " < " + n);
+  public static byte[] readBytes(File file, long offset, int length) throws IOException {
+    byte[] buffer = new byte[length];
+    try (RandomAccessFile raf = new RandomAccessFile(file, "r")) {
+      raf.seek(offset);
+      int bytesRead = raf.read(buffer);
+      if (bytesRead != length) {
+        throw new IOException("Expected " + length + " bytes, got " + bytesRead);
+      }
     }
-
-    try (RandomAccessFile randomAccessFile = new RandomAccessFile(file, "r")) {
-      byte[] buffer = new byte[n];
-      randomAccessFile.seek(0);
-      randomAccessFile.readFully(buffer);
-      return buffer;
-    }
-  }
-
-  private static byte[] readLastNBytes(File file, int n) throws IOException {
-    long fileSize = file.length();
-
-    if (fileSize < n) {
-      throw new IOException("File too small: " + fileSize + " < " + n);
-    }
-
-    try (RandomAccessFile randomAccessFile = new RandomAccessFile(file, "r")) {
-      byte[] buffer = new byte[n];
-      randomAccessFile.seek(fileSize - n);
-      randomAccessFile.readFully(buffer);
-      return buffer;
-    }
+    return buffer;
   }
 
   private static String getFileExtension(File file) {

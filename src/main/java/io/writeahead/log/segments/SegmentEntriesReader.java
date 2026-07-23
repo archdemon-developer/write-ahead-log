@@ -10,9 +10,9 @@ import java.io.*;
 import java.util.ArrayList;
 import java.util.List;
 
-public class SegmentReader {
+public class SegmentEntriesReader {
 
-    private final Logger log = LoggerFactory.getLogger(SegmentReader.class);
+    private final Logger log = LoggerFactory.getLogger(SegmentEntriesReader.class);
 
     public SegmentReadResult readEntriesFromRegion(byte[] entryRegionBytes) throws IOException {
         List<LogEntry> logEntries = new ArrayList<>();
@@ -50,10 +50,6 @@ public class SegmentReader {
         }
 
         return new SegmentReadResult(logEntries, entriesRead, hasCorruption, corruptionAtEntry);
-    }
-
-    public static long computeEntryCrc(long timestamp, int size, byte[] data) throws IOException {
-        return Crc32Utils.computeEntryCrc(timestamp, size, data);
     }
 
     public record SegmentReadResult(
