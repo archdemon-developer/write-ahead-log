@@ -65,8 +65,8 @@ public class SegmentReaderTest {
                 new LogEntry(2, "e3".getBytes(), 3000L));
 
         // Corrupt the second entry's CRC
-        int firstEntrySize = 8 + 4 + 2 + 8;  // 22 bytes
-        int secondEntryStart = firstEntrySize;
+        // 22 bytes
+        int secondEntryStart = 8 + 4 + 2 + 8;
         int secondEntryCrcPos = secondEntryStart + 8 + 4 + 2;
         entryRegion[secondEntryCrcPos + 1] = (byte) ~entryRegion[secondEntryCrcPos + 1];
         entryRegion[secondEntryCrcPos] = (byte) ~entryRegion[secondEntryCrcPos];
@@ -122,8 +122,7 @@ public class SegmentReaderTest {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         DataOutputStream dos = new DataOutputStream(baos);
 
-        for (int i = 0; i < entries.length; i++) {
-            LogEntry entry = entries[i];
+        for (LogEntry entry : entries) {
             long crc = Crc32Utils.computeEntryCrc(entry.timestamp(), entry.size(), entry.data());
 
             byte[] entryWithCrc = EntrySerdes.serializeEntryWithCrc(
