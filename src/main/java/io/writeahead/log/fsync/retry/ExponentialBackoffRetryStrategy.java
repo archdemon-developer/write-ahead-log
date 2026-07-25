@@ -54,7 +54,7 @@ public class ExponentialBackoffRetryStrategy implements FsyncRetryStrategy {
               ex.getMessage());
           sleep(waitMs);
         } else {
-          log.error("Fsync failed on final attempt {}/{}: {}", ex, attempt + 1, maxRetries + 1);
+          log.error("Fsync failed on final attempt {}/{}: {}", attempt + 1, maxRetries + 1, ex);
         }
       }
     }
@@ -64,6 +64,8 @@ public class ExponentialBackoffRetryStrategy implements FsyncRetryStrategy {
         lastException,
         (maxRetries + 1),
         lastException == null ? null : lastException.getMessage());
+
+    throw lastException;
   }
 
   private void sleep(long waitMs) throws IOException {
