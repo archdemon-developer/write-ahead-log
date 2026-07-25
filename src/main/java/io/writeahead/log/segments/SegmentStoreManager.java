@@ -1,8 +1,13 @@
 package io.writeahead.log.segments;
 
 import io.writeahead.log.constants.WalConstants;
+import io.writeahead.log.fsync.FsyncExecutor;
+import io.writeahead.log.fsync.FsyncRetryStrategy;
+import io.writeahead.log.fsync.factory.FsyncExecutorFactory;
+import io.writeahead.log.fsync.factory.FsyncRetryStrategyFactory;
 import io.writeahead.log.logging.Logger;
 import io.writeahead.log.logging.LoggerFactory;
+import io.writeahead.log.metrics.SimpleWalMetrics;
 import io.writeahead.log.models.LogEntry;
 import io.writeahead.log.models.file.FileStream;
 import io.writeahead.log.models.segment.SegmentMetadata;
@@ -21,7 +26,6 @@ public class SegmentStoreManager {
 
     private static final Logger log = LoggerFactory.getLogger(SegmentStoreManager.class);
 
-    private final SegmentMetadataRecovery metadataRecovery;
     private final SegmentLifecycleManager lifecycleManager;
     private final SegmentEntriesReader segmentReader;
     private final WalConfiguration config;
@@ -36,12 +40,17 @@ public class SegmentStoreManager {
     private long currentMinTimestamp;
     private long currentMaxTimestamp;
 
+    private final List<LogEntry> writeBatch;
+    private FsyncExecutor fsyncExecutor;
+    private final FsyncRetryStrategy fsyncRetryStrategy;
+    private final SimpleWalMetrics metrics = new SimpleWalMetrics();
+
     private boolean isOpen;
 
     public SegmentStoreManager(WalConfiguration config) throws IOException {
         this.config = config;
 
-        this.metadataRecovery = new SegmentMetadataRecovery(config.logDir());
+        SegmentMetadataRecovery metadataRecovery = new SegmentMetadataRecovery(config.logDir());
         this.lifecycleManager = new SegmentLifecycleManager(config.logDir());
         this.segmentReader = new SegmentEntriesReader();
 
@@ -56,6 +65,10 @@ public class SegmentStoreManager {
         this.currentMinTimestamp = Long.MAX_VALUE;
         this.currentMaxTimestamp = Long.MIN_VALUE;
 
+        this.writeBatch = new ArrayList<>();
+        this.fsyncRetryStrategy = FsyncRetryStrategyFactory.create(config, metrics);
+        this.fsyncExecutor = FsyncExecutorFactory.create(config.fsyncStrategy(), fsyncRetryStrategy, currentStream);
+
         this.isOpen = true;
 
         log.info("SegmentStoreManager initialized: {} segments recovered, next sequence: {}",
@@ -63,23 +76,32 @@ public class SegmentStoreManager {
     }
 
     public void append(LogEntry entry) throws IOException {
-        if(!isOpen) {
-            throw new IOException("SegmentStoreManager is closed");
+        writeBatch.add(entry);
+
+        if (writeBatch.size() >= config.batchSize()) {
+            flushBatch();
+        }
+    }
+
+    private void flushBatch() throws IOException {
+        for (LogEntry entry : writeBatch) {
+            long crc = Crc32Utils.computeEntryCrc(entry.timestamp(), entry.data().length, entry.data());
+            byte[] entryBytes = EntrySerdes.serializeEntryWithCrc(entry.timestamp(), entry.data().length, entry.data(), crc);
+            FileUtils.writeToStream(currentStream, entryBytes);
+
+            currentStreamSize += entryBytes.length;
+            currentEntryCount++;
+            currentMinTimestamp = Math.min(currentMinTimestamp, entry.timestamp());
+            currentMaxTimestamp = Math.max(currentMaxTimestamp, entry.timestamp());
+
+            fsyncExecutor.onEntryWritten();
+            metrics.recordEntryWritten(entry.data().length);
         }
 
-        long crc = Crc32Utils.computeEntryCrc(entry.timestamp(), entry.data().length, entry.data());
+        fsyncExecutor.onBatchComplete();
+        writeBatch.clear();
 
-        byte[] entryBytes = EntrySerdes.serializeEntryWithCrc(entry.timestamp(), entry.data().length, entry.data(), crc);
-
-        FileUtils.writeToStream(currentStream, entryBytes);
-        currentStreamSize += entryBytes.length;
-        currentEntryCount += 1;
-        currentMinTimestamp = Math.min(currentMinTimestamp, entry.timestamp());
-        currentMaxTimestamp = Math.max(currentMaxTimestamp, entry.timestamp());
-
-        if(currentStreamSize >= config.maxSegmentSize()) {
-            log.info("DEBUG: Triggering rotation - size {} >= max {}",
-                    currentStreamSize, config.maxSegmentSize());
+        if (currentStreamSize >= config.maxSegmentSize()) {
             rotateSegment();
         }
     }
@@ -110,6 +132,8 @@ public class SegmentStoreManager {
     }
 
     public void close() throws IOException {
+        flushBatch();
+
         if (!isOpen) {
             return;
         }
@@ -142,6 +166,8 @@ public class SegmentStoreManager {
         this.currentEntryCount = 0;
         this.currentMinTimestamp = Long.MAX_VALUE;
         this.currentMaxTimestamp = Long.MIN_VALUE;
+
+        this.fsyncExecutor = FsyncExecutorFactory.create(config.fsyncStrategy(), fsyncRetryStrategy, currentStream);
 
         log.info("Rotated segment: {} -> {}", currentSequenceNumber - 1, currentSequenceNumber);
     }
@@ -178,8 +204,6 @@ public class SegmentStoreManager {
         List<SegmentMetadata> toDelete = new ArrayList<>();
 
         for(SegmentMetadata segmentMetadata : segments) {
-            log.info("DEBUG: Checking segment {}: maxTs={}, threshold={}, delete={}",
-                    segmentMetadata.filename(), segmentMetadata.maxTimestamp(), timestamp, segmentMetadata.maxTimestamp() < timestamp);
             if(segmentMetadata.maxTimestamp() <= timestamp) {
                 toDelete.add(segmentMetadata);
             }

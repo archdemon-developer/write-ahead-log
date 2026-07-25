@@ -24,9 +24,10 @@ public class SegmentStoreManagerTest {
     @BeforeEach
     void setUp() throws IOException {
         tempDir = Files.createTempDirectory("wal-store-test-");
-        config = new WalConfiguration.Builder()
+        config = config = new WalConfiguration.Builder()
                 .logDir(tempDir.toString())
-                .maxSegmentSize(500)  // Small for testing rotations
+                .maxSegmentSize(500)
+                .batchSize(1)  // ← Flush immediately for testing
                 .build();  // 500 bytes max
     }
 
