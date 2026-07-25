@@ -66,6 +66,23 @@ public record WalConfiguration(
       if (logDir == null) {
         throw new IllegalArgumentException("logDir is required");
       }
+
+      if (batchSize <= 0) {
+        throw new IllegalArgumentException("batchSize must be > 0, got: " + batchSize);
+      }
+      if (maxSegmentSize <= 0) {
+        throw new IllegalArgumentException("maxSegmentSize must be > 0, got: " + maxSegmentSize);
+      }
+      if (maxRetries < 0) {
+        throw new IllegalArgumentException("maxRetries must be >= 0, got: " + maxRetries);
+      }
+      if (retryBackoffMs <= 0) {
+        throw new IllegalArgumentException("retryBackoffMs must be > 0, got: " + retryBackoffMs);
+      }
+      if (retryBackoffMultiplier <= 0) {
+        throw new IllegalArgumentException("retryBackoffMultiplier must be > 0, got: " + retryBackoffMultiplier);
+      }
+
       return new WalConfiguration(
           batchSize,
           maxSegmentSize,

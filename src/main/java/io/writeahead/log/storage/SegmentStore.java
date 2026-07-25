@@ -6,7 +6,9 @@ import java.io.IOException;
 import java.util.List;
 
 public interface SegmentStore {
-  void writeBatch(List<LogEntry> batch) throws IOException;
+  void append(LogEntry entry) throws IOException;
+
+  void writeBatch() throws IOException;
 
   List<LogEntry> readAllSegments() throws IOException;
 

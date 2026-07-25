@@ -10,21 +10,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
-/**
- * MILITARY-GRADE LOCKING TESTS FOR LockableOperation
- *
- * <p>LockableOperation uses ReadWriteLock for thread safety. If wrong:
- * - Race conditions on writes
- * - Deadlocks on concurrent access
- * - Lost updates
- *
- * <p>These tests verify lock correctness for production reliability.
- */
 public class LockableOperationTest {
-
-    // ============================================================================
-    // SECTION 1: WRITE LOCK BEHAVIOR
-    // ============================================================================
 
     @Test
     void testExecuteWithWriteLockSucceeds() throws IOException {
@@ -49,12 +35,12 @@ public class LockableOperationTest {
             new Thread(
                     () -> {
                         try {
-                            startLatch.await(); // Wait for all threads to start
+                            startLatch.await();
                             lock.executeWithWriteLock(
                                     () -> {
                                         order.add(threadId);
                                         try {
-                                            Thread.sleep(10); // Simulate work
+                                            Thread.sleep(10);
                                         } catch (InterruptedException e) {}
                                         return null;
                                     });
@@ -67,12 +53,12 @@ public class LockableOperationTest {
                     .start();
         }
 
-        startLatch.countDown(); // Release all threads
-        endLatch.await(); // Wait for all to complete
+        startLatch.countDown();
+        endLatch.await();
 
-        // All operations completed
+
         assertEquals(threadCount, order.size(), "All threads should complete");
-        // Note: Order may vary, but all should execute serially (one at a time)
+
     }
 
     @Test
@@ -116,10 +102,6 @@ public class LockableOperationTest {
         assertEquals(1, maxConcurrent.get(), "Only 1 thread should execute critical section at a time");
     }
 
-    // ============================================================================
-    // SECTION 2: READ LOCK BEHAVIOR
-    // ============================================================================
-
     @Test
     void testExecuteWithReadLockSucceeds() throws IOException {
         LockableOperation lock = new LockableOperation();
@@ -145,12 +127,12 @@ public class LockableOperationTest {
                             lock.executeWithReadLock(
                                     () -> {
                                         int current = concurrentCount.incrementAndGet();
-                                        // Record max concurrent
+
                                         while (current > maxConcurrent.get()) {
                                             maxConcurrent.compareAndSet(maxConcurrent.get(), current);
                                         }
                                         try {
-                                            Thread.sleep(50); // Hold read lock
+                                            Thread.sleep(50);
                                         } catch (InterruptedException e) {}
 
                                         concurrentCount.decrementAndGet();
@@ -167,20 +149,14 @@ public class LockableOperationTest {
 
         endLatch.await();
 
-        // Multiple readers should run concurrently
         assertTrue(maxConcurrent.get() > 1, "Multiple readers should run concurrently (got " + maxConcurrent.get() + ")");
     }
-
-    // ============================================================================
-    // SECTION 3: READ-WRITE EXCLUSION
-    // ============================================================================
 
     @Test
     void testWriteLockBlocksReaders() throws IOException, InterruptedException {
         LockableOperation lock = new LockableOperation();
         List<String> events = Collections.synchronizedList(new ArrayList<>());
 
-        // Start a write that holds the lock
         CountDownLatch writeLockAcquired = new CountDownLatch(1);
         CountDownLatch writeComplete = new CountDownLatch(1);
 
@@ -193,7 +169,7 @@ public class LockableOperationTest {
                                             events.add("write-start");
                                             writeLockAcquired.countDown();
                                             try {
-                                                Thread.sleep(100); // Hold lock
+                                                Thread.sleep(100);
                                             } catch (InterruptedException e) {}
                                             events.add("write-end");
                                             return null;
@@ -207,10 +183,8 @@ public class LockableOperationTest {
 
         writer.start();
 
-        // Wait for write to acquire lock
         writeLockAcquired.await();
 
-        // Try to read (should be blocked)
         CountDownLatch readComplete = new CountDownLatch(1);
         Thread reader =
                 new Thread(
@@ -231,15 +205,13 @@ public class LockableOperationTest {
 
         reader.start();
 
-        Thread.sleep(50); // Give reader time to wait
+        Thread.sleep(50);
 
-        // Writer should still be holding lock, reader should be blocked
         assertEquals(1, events.size(), "Only write-start should have executed, reader blocked");
 
-        writeComplete.await(); // Wait for write to complete
-        readComplete.await(); // Reader should now complete
+        writeComplete.await();
+        readComplete.await();
 
-        // Verify order: write-start, write-end, read-start, read-end
         assertEquals("write-start", events.get(0));
         assertEquals("write-end", events.get(1));
         assertEquals("read-start", events.get(2));
@@ -251,7 +223,6 @@ public class LockableOperationTest {
         LockableOperation lock = new LockableOperation();
         List<String> events = Collections.synchronizedList(new ArrayList<>());
 
-        // Start readers that hold the lock
         CountDownLatch readLockAcquired = new CountDownLatch(3);
         CountDownLatch readsComplete = new CountDownLatch(3);
 
@@ -265,7 +236,7 @@ public class LockableOperationTest {
                                         events.add("read-" + readerId + "-start");
                                         readLockAcquired.countDown();
                                         try {
-                                            Thread.sleep(100); // Hold read lock
+                                            Thread.sleep(100);
                                         } catch(InterruptedException e) {}
                                         events.add("read-" + readerId + "-end");
                                         return null;
@@ -279,10 +250,8 @@ public class LockableOperationTest {
                     .start();
         }
 
-        // Wait for readers to acquire locks
         readLockAcquired.await();
 
-        // Try to write (should be blocked by readers)
         CountDownLatch writeComplete = new CountDownLatch(1);
         Thread writer =
                 new Thread(
@@ -303,17 +272,15 @@ public class LockableOperationTest {
 
         writer.start();
 
-        Thread.sleep(50); // Give writer time to wait
+        Thread.sleep(50);
 
-        // Writer should be blocked
         assertFalse(
                 events.stream().anyMatch(e -> e.contains("write")),
                 "Write should be blocked by readers");
 
-        readsComplete.await(); // Readers complete
-        writeComplete.await(); // Writer should now complete
+        readsComplete.await();
+        writeComplete.await();
 
-        // Verify all reads completed before write
         int lastReadEnd = -1;
         int firstWriteStart = -1;
         for (int i = 0; i < events.size(); i++) {
@@ -329,16 +296,11 @@ public class LockableOperationTest {
         assertTrue(lastReadEnd < firstWriteStart, "All reads should complete before write starts");
     }
 
-    // ============================================================================
-    // SECTION 4: EXCEPTION HANDLING
-    // ============================================================================
-
     @Test
     void testWriteLockReleasedOnException() throws IOException, InterruptedException {
         LockableOperation lock = new LockableOperation();
         AtomicInteger successCount = new AtomicInteger(0);
 
-        // First operation throws
         assertThrows(
                 RuntimeException.class,
                 () ->
@@ -348,7 +310,7 @@ public class LockableOperationTest {
                                 }),
                 "Should propagate exception");
 
-        // Lock should be released, second operation succeeds
+
         lock.executeWithWriteLock(
                 () -> {
                     successCount.incrementAndGet();
@@ -363,7 +325,6 @@ public class LockableOperationTest {
         LockableOperation lock = new LockableOperation();
         AtomicInteger successCount = new AtomicInteger(0);
 
-        // First operation throws
         assertThrows(
                 RuntimeException.class,
                 () ->
@@ -373,7 +334,6 @@ public class LockableOperationTest {
                                 }),
                 "Should propagate exception");
 
-        // Lock should be released, second operation succeeds
         lock.executeWithReadLock(
                 () -> {
                     successCount.incrementAndGet();
@@ -383,20 +343,15 @@ public class LockableOperationTest {
         assertEquals(1, successCount.get(), "Lock should be released after exception");
     }
 
-    // ============================================================================
-    // SECTION 5: FAIRNESS & STARVATION
-    // ============================================================================
-
     @Test
     void testNoWriterStarvation() throws IOException, InterruptedException {
         LockableOperation lock = new LockableOperation();
         AtomicInteger writeCount = new AtomicInteger(0);
         AtomicInteger readCount = new AtomicInteger(0);
 
-        int duration = 2000; // 2 seconds
+        int duration = 2000;
         long endTime = System.currentTimeMillis() + duration;
 
-        // Multiple reader threads
         CountDownLatch readersStart = new CountDownLatch(5);
         for (int i = 0; i < 5; i++) {
             new Thread(
@@ -410,7 +365,7 @@ public class LockableOperationTest {
                                         });
                             }
                         } catch (IOException e) {
-                            // Ignore
+
                         } finally {
                             readersStart.countDown();
                         }
@@ -418,7 +373,6 @@ public class LockableOperationTest {
                     .start();
         }
 
-        // Writer thread
         CountDownLatch writerStart = new CountDownLatch(1);
         new Thread(
                 () -> {
@@ -431,7 +385,7 @@ public class LockableOperationTest {
                                     });
                         }
                     } catch (IOException e) {
-                        // Ignore
+
                     } finally {
                         writerStart.countDown();
                     }
@@ -441,13 +395,8 @@ public class LockableOperationTest {
         readersStart.await();
         writerStart.await();
 
-        // Writer should have gotten some turns (not starved)
         assertTrue(writeCount.get() > 0, "Writer should complete some operations (not starved)");
     }
-
-    // ============================================================================
-    // SECTION 6: RETURN VALUE HANDLING
-    // ============================================================================
 
     @Test
     void testWriteLockReturnValue() throws IOException {
@@ -498,14 +447,12 @@ public class LockableOperationTest {
                         try {
                             for (int op = 0; op < operationsPerThread; op++) {
                                 if (threadId % 2 == 0) {
-                                    // Even threads do reads
                                     lock.executeWithReadLock(
                                             () -> {
                                                 operationCount.incrementAndGet();
                                                 return null;
                                             });
                                 } else {
-                                    // Odd threads do writes
                                     lock.executeWithWriteLock(
                                             () -> {
                                                 operationCount.incrementAndGet();

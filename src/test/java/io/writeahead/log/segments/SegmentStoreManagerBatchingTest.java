@@ -180,7 +180,7 @@ public class SegmentStoreManagerBatchingTest {
         manager.close();
 
         SegmentStoreManager manager2 = new SegmentStoreManager(config);
-        List<LogEntry> entries = manager2.readAllEntries();
+        List<LogEntry> entries = manager2.readAllSegments();
 
         assertEquals(3, entries.size(), "Partial batch should be flushed on close");
 
@@ -194,7 +194,7 @@ public class SegmentStoreManagerBatchingTest {
         manager.close();
 
         SegmentStoreManager manager2 = new SegmentStoreManager(config);
-        List<LogEntry> entries = manager2.readAllEntries();
+        List<LogEntry> entries = manager2.readAllSegments();
 
         assertEquals(0, entries.size(), "Empty batch on close should not crash");
 
@@ -212,7 +212,7 @@ public class SegmentStoreManagerBatchingTest {
         manager.close();
 
         SegmentStoreManager manager2 = new SegmentStoreManager(config);
-        List<LogEntry> entries = manager2.readAllEntries();
+        List<LogEntry> entries = manager2.readAllSegments();
 
         assertEquals(5, entries.size(), "All 5 flushed entries should persist");
 
@@ -236,7 +236,7 @@ public class SegmentStoreManagerBatchingTest {
         manager.close();
 
         SegmentStoreManager manager2 = new SegmentStoreManager(config);
-        List<LogEntry> entries = manager2.readAllEntries();
+        List<LogEntry> entries = manager2.readAllSegments();
 
         assertEquals(8, entries.size(), "All 8 entries persisted (5+3)");
 
@@ -261,7 +261,7 @@ public class SegmentStoreManagerBatchingTest {
         manager.close();
 
         SegmentStoreManager manager2 = new SegmentStoreManager(config);
-        List<LogEntry> entries = manager2.readAllEntries();
+        List<LogEntry> entries = manager2.readAllSegments();
 
         assertEquals(totalEntries, entries.size(), "All entries should persist across segments");
 
@@ -279,7 +279,7 @@ public class SegmentStoreManagerBatchingTest {
         manager.close();
 
         SegmentStoreManager manager2 = new SegmentStoreManager(config);
-        List<LogEntry> entries = manager2.readAllEntries();
+        List<LogEntry> entries = manager2.readAllSegments();
 
         assertEquals(5, entries.size(), "Fsync callbacks ensured durability");
 
@@ -304,7 +304,7 @@ public class SegmentStoreManagerBatchingTest {
         manager.close();
 
         SegmentStoreManager manager2 = new SegmentStoreManager(smallBatchConfig);
-        List<LogEntry> entries = manager2.readAllEntries();
+        List<LogEntry> entries = manager2.readAllSegments();
 
         assertEquals(3, entries.size(), "All fsync callbacks executed");
 
@@ -346,7 +346,7 @@ public class SegmentStoreManagerBatchingTest {
         manager.close();
 
         SegmentStoreManager manager2 = new SegmentStoreManager(config);
-        List<LogEntry> entries = manager2.readAllEntries();
+        List<LogEntry> entries = manager2.readAllSegments();
 
         assertEquals(8, entries.size(), "Metrics should show 8 total entries");
 
@@ -384,7 +384,7 @@ public class SegmentStoreManagerBatchingTest {
         manager.close();
 
         SegmentStoreManager manager2 = new SegmentStoreManager(config);
-        List<LogEntry> entries = manager2.readAllEntries();
+        List<LogEntry> entries = manager2.readAllSegments();
         assertEquals(6, entries.size(), "Last entry flushed on close");
 
         manager2.close();
@@ -409,7 +409,7 @@ public class SegmentStoreManagerBatchingTest {
         manager.close();
 
         SegmentStoreManager manager2 = new SegmentStoreManager(config);
-        List<LogEntry> entries = manager2.readAllEntries();
+        List<LogEntry> entries = manager2.readAllSegments();
         assertEquals(15, entries.size(), "All 15 entries persisted across multiple batch cycles");
 
         manager2.close();
@@ -430,7 +430,7 @@ public class SegmentStoreManagerBatchingTest {
         manager.close();
 
         SegmentStoreManager manager2 = new SegmentStoreManager(config);
-        List<LogEntry> entries = manager2.readAllEntries();
+        List<LogEntry> entries = manager2.readAllSegments();
 
         assertEquals(8, entries.size(), "Partial batch persisted on proper close");
 
@@ -459,7 +459,7 @@ public class SegmentStoreManagerBatchingTest {
 
         // Reopen and recover
         SegmentStoreManager manager2 = new SegmentStoreManager(config);
-        List<LogEntry> recovered = manager2.readAllEntries();
+        List<LogEntry> recovered = manager2.readAllSegments();
 
         // VERIFY: Count matches exactly
         assertEquals(5, recovered.size(), "All 5 entries recovered (no loss, no corruption)");
@@ -529,7 +529,7 @@ public class SegmentStoreManagerBatchingTest {
         assertEquals(1, segments.get(0).sequenceNumber(), "Recovered segment is sequence 1");
 
         // VERIFY: Entries from segment 1 recovered
-        List<LogEntry> entries = manager2.readAllEntries();
+        List<LogEntry> entries = manager2.readAllSegments();
         assertEquals(20, entries.size(), "All 20 entries from segment 1 recovered");
 
         // VERIFY: Entries from segment 2 LOST (crashed, unfinalized)
@@ -545,7 +545,7 @@ public class SegmentStoreManagerBatchingTest {
         manager2.close();
 
         SegmentStoreManager manager3 = new SegmentStoreManager(config);
-        List<LogEntry> finalEntries = manager3.readAllEntries();
+        List<LogEntry> finalEntries = manager3.readAllSegments();
 
         assertEquals(21, finalEntries.size(), "New entry appended after crash recovery works");
         manager3.close();
@@ -561,6 +561,8 @@ public class SegmentStoreManagerBatchingTest {
             manager.append(new LogEntry(10, "1234567890".getBytes(), (long) i * 100));
         }
 
+        manager.close();
+
         List<SegmentMetadata> segments = manager.getSegments();
 
         // VERIFY: Sequence numbers are continuous with NO GAPS
@@ -573,7 +575,6 @@ public class SegmentStoreManagerBatchingTest {
                     "Sequence number gap detected: segment " + i + " should be " + expectedSeq + " not " + actualSeq);
         }
 
-        manager.close();
 
         // VERIFY: After recovery, sequences remain continuous
         SegmentStoreManager manager2 = new SegmentStoreManager(config);
@@ -592,6 +593,30 @@ public class SegmentStoreManagerBatchingTest {
     }
 
     @Test
+    void testWriteBatchFlushesPartialBatch() throws IOException {
+        WalConfiguration smallBatchConfig = new WalConfiguration.Builder()
+                .logDir(tempDir.toString())
+                .maxSegmentSize(500)
+                .batchSize(10)  // Large batch size
+                .build();
+
+        SegmentStoreManager manager = new SegmentStoreManager(smallBatchConfig);
+
+        // Add 3 entries (less than batch size 10)
+        for (int i = 0; i < 3; i++) {
+            manager.append(new LogEntry(5, "test".getBytes(), (long)i * 1000));
+        }
+
+        // writeBatch should flush the 3 entries even though batch isn't full
+        manager.writeBatch();
+
+        assertEquals(3, manager.getCurrentEntryCount(),
+                "All 3 entries should be flushed to disk");
+
+        manager.close();
+    }
+
+    @Test
     void testBatchFlushPreservesEntryOrder() throws IOException {
         SegmentStoreManager manager = new SegmentStoreManager(config);
 
@@ -607,7 +632,7 @@ public class SegmentStoreManagerBatchingTest {
 
         // Recover and verify order
         SegmentStoreManager manager2 = new SegmentStoreManager(config);
-        List<LogEntry> entries = manager2.readAllEntries();
+        List<LogEntry> entries = manager2.readAllSegments();
 
         assertEquals(25, entries.size(), "All entries recovered");
 
@@ -663,7 +688,7 @@ public class SegmentStoreManagerBatchingTest {
 
         // Recovery: reopen
         SegmentStoreManager manager2 = new SegmentStoreManager(config);
-        List<LogEntry> entries = manager2.readAllEntries();
+        List<LogEntry> entries = manager2.readAllSegments();
 
         // VERIFY: Recovered entries BEFORE corruption
         assertEquals(2, entries.size(),
@@ -712,7 +737,7 @@ public class SegmentStoreManagerBatchingTest {
         assertEquals(maxTs, seg.maxTimestamp(), "Max timestamp in footer mismatch");
 
         // Double-check by reading entries
-        List<LogEntry> entries = manager2.readAllEntries();
+        List<LogEntry> entries = manager2.readAllSegments();
         assertEquals(seg.entryCount(), entries.size(), "Metadata entry count must match recovered entries");
 
         manager2.close();
@@ -727,7 +752,7 @@ public class SegmentStoreManagerBatchingTest {
         manager.close();
 
         SegmentStoreManager manager2 = new SegmentStoreManager(config);
-        List<LogEntry> entries = manager2.readAllEntries();
+        List<LogEntry> entries = manager2.readAllSegments();
 
         assertEquals(1, entries.size(), "Single small entry handled");
         assertEquals(1, entries.get(0).size(), "Size preserved");
@@ -750,7 +775,7 @@ public class SegmentStoreManagerBatchingTest {
         manager.close();
 
         SegmentStoreManager manager2 = new SegmentStoreManager(config);
-        List<LogEntry> entries = manager2.readAllEntries();
+        List<LogEntry> entries = manager2.readAllSegments();
 
         assertEquals(2, entries.size(), "Large entries handled");
         assertEquals(largeData.length, entries.get(0).size(), "Large size preserved");
@@ -771,7 +796,7 @@ public class SegmentStoreManagerBatchingTest {
         manager.close();
 
         SegmentStoreManager manager2 = new SegmentStoreManager(config);
-        List<LogEntry> entries = manager2.readAllEntries();
+        List<LogEntry> entries = manager2.readAllSegments();
 
         assertEquals(5, entries.size(), "Mixed sizes handled");
         assertEquals(1, entries.get(0).size());
@@ -796,7 +821,7 @@ public class SegmentStoreManagerBatchingTest {
         manager.close();
 
         SegmentStoreManager manager2 = new SegmentStoreManager(config);
-        List<LogEntry> entries = manager2.readAllEntries();
+        List<LogEntry> entries = manager2.readAllSegments();
 
         assertEquals(5, entries.size(), "Extreme timestamps handled");
         assertEquals(Long.MIN_VALUE, entries.get(0).timestamp());
@@ -850,7 +875,7 @@ public class SegmentStoreManagerBatchingTest {
         manager.close();
 
         SegmentStoreManager manager2 = new SegmentStoreManager(config);
-        List<LogEntry> entries = manager2.readAllEntries();
+        List<LogEntry> entries = manager2.readAllSegments();
 
         assertEquals(25, entries.size(), "Batch accumulation across rotation works");
 
@@ -883,7 +908,7 @@ public class SegmentStoreManagerBatchingTest {
         manager.close();
 
         SegmentStoreManager manager2 = new SegmentStoreManager(config);
-        List<LogEntry> entries = manager2.readAllEntries();
+        List<LogEntry> entries = manager2.readAllSegments();
 
         assertEquals(22, entries.size(), "All entries including partial batch persisted");
 
@@ -922,7 +947,7 @@ public class SegmentStoreManagerBatchingTest {
         // Session 3: Reopen and recover
         {
             SegmentStoreManager manager2 = new SegmentStoreManager(config);
-            List<LogEntry> entries = manager2.readAllEntries();
+            List<LogEntry> entries = manager2.readAllSegments();
 
             // Should recover: 5 from segment 1 (finalized) + 0 from segment 2 (unfinalized, skipped)
             assertEquals(
@@ -947,7 +972,7 @@ public class SegmentStoreManagerBatchingTest {
         manager.close();
 
         SegmentStoreManager manager2 = new SegmentStoreManager(config);
-        List<LogEntry> entries = manager2.readAllEntries();
+        List<LogEntry> entries = manager2.readAllSegments();
 
         assertEquals(5, entries.size(), "Empty entries handled");
         assertEquals(0, entries.get(0).size());
@@ -967,7 +992,7 @@ public class SegmentStoreManagerBatchingTest {
         manager.close();
 
         SegmentStoreManager manager2 = new SegmentStoreManager(config);
-        List<LogEntry> entries = manager2.readAllEntries();
+        List<LogEntry> entries = manager2.readAllSegments();
 
         assertEquals(5, entries.size(), "Batch persisted despite edge cases");
 
@@ -1015,7 +1040,7 @@ public class SegmentStoreManagerBatchingTest {
         manager.close();
 
         SegmentStoreManager manager2 = new SegmentStoreManager(config);
-        List<LogEntry> entries = manager2.readAllEntries();
+        List<LogEntry> entries = manager2.readAllSegments();
 
         assertEquals(10, entries.size(), "All batches persisted");
         assertEquals(1000L, entries.get(0).timestamp());
@@ -1060,7 +1085,7 @@ public class SegmentStoreManagerBatchingTest {
 
         {
             SegmentStoreManager manager = new SegmentStoreManager(config);
-            List<LogEntry> entries = manager.readAllEntries();
+            List<LogEntry> entries = manager.readAllSegments();
             assertEquals(5, entries.size(), "Recovery after crash shows only flushed entries");
 
             manager.append(new LogEntry(4, "test".getBytes(), 9000L));
@@ -1071,7 +1096,7 @@ public class SegmentStoreManagerBatchingTest {
 
         {
             SegmentStoreManager manager = new SegmentStoreManager(config);
-            List<LogEntry> entries = manager.readAllEntries();
+            List<LogEntry> entries = manager.readAllSegments();
             assertEquals(7, entries.size(), "Final recovery shows 5 + 2 new entries");
             manager.close();
         }

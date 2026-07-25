@@ -156,6 +156,135 @@ public class SegmentFooterTest {
     }
 
     @Test
+    void testCompleteMarkerSerialization() throws IOException {
+        SegmentFooter footer = SegmentFooter.create(10, 1000L, 5000L);
+
+        byte[] bytes = footer.toBytes();
+
+        // Should be 36 bytes: entryCount(4) + minTs(8) + maxTs(8) + marker(8) + checksum(8)
+        assertEquals(36, bytes.length, "Footer should be 36 bytes with completeMarker");
+    }
+
+    @Test
+    void testCompleteMarkerDeserialization() throws IOException {
+        SegmentFooter original = SegmentFooter.create(5, 2000L, 8000L);
+        byte[] bytes = original.toBytes();
+
+        SegmentFooter deserialized = SegmentFooter.fromBytes(bytes);
+
+        assertEquals(original.entryCount(), deserialized.entryCount());
+        assertEquals(original.minTimestamp(), deserialized.minTimestamp());
+        assertEquals(original.maxTimestamp(), deserialized.maxTimestamp());
+        assertEquals(0xDEADBEEFL, deserialized.completeMarker(),
+                "completeMarker should be 0xDEADBEEF");
+    }
+
+    @Test
+    void testCompleteMarkerRoundTrip() throws IOException {
+        SegmentFooter footer = SegmentFooter.create(100, 1500L, 9500L);
+
+        byte[] serialized = footer.toBytes();
+        SegmentFooter deserialized = SegmentFooter.fromBytes(serialized);
+        byte[] reserialized = deserialized.toBytes();
+
+        // Bytes should match exactly
+        assertArrayEquals(serialized, reserialized,
+                "Round-trip serialization should produce identical bytes");
+    }
+
+    @Test
+    void testCompleteMarkerInChecksum() throws IOException {
+        SegmentFooter footer1 = SegmentFooter.create(5, 1000L, 5000L);
+
+        // Manually create a footer with different marker (shouldn't happen, but test it)
+        // The checksum is computed with the marker, so if marker changes, checksum should differ
+        byte[] bytes = footer1.toBytes();
+
+        // Corrupt the marker bytes (positions 20-27, after entry count + timestamps)
+        // This will break the checksum
+        bytes[20] = (byte) (bytes[20] ^ 0xFF);  // Flip bits in marker
+
+        SegmentFooter corrupted = SegmentFooter.fromBytes(bytes);
+
+        assertFalse(corrupted.isValid(),
+                "Footer with corrupted marker should fail checksum validation");
+    }
+
+    @Test
+    void testCompleteMarkerValidation() throws IOException {
+        SegmentFooter footer = SegmentFooter.create(15, 3000L, 7000L);
+
+        assertTrue(footer.isValid(), "Valid footer should pass validation");
+
+        // Verify the marker is what we expect
+        assertEquals(0xDEADBEEFL, footer.completeMarker(),
+                "completeMarker should be 0xDEADBEEF");
+    }
+
+    @Test
+    void testCompleteMarkerConsistentAcrossCreates() throws IOException {
+        SegmentFooter footer1 = SegmentFooter.create(5, 1000L, 5000L);
+        SegmentFooter footer2 = SegmentFooter.create(10, 2000L, 8000L);
+        SegmentFooter footer3 = SegmentFooter.create(100, 5000L, 10000L);
+
+        // All footers should have the same marker
+        assertEquals(footer1.completeMarker(), footer2.completeMarker());
+        assertEquals(footer2.completeMarker(), footer3.completeMarker());
+
+        // All should be the magic value
+        assertEquals(0xDEADBEEFL, footer1.completeMarker());
+    }
+
+    @Test
+    void testCompleteMarkerSurvivesSerializationRoundTrip() throws IOException {
+        long originalMarker = 0xDEADBEEFL;
+
+        SegmentFooter footer = SegmentFooter.create(20, 1500L, 9500L);
+
+        byte[] bytes = footer.toBytes();
+        SegmentFooter deserialized = SegmentFooter.fromBytes(bytes);
+
+        assertEquals(originalMarker, deserialized.completeMarker(),
+                "completeMarker should survive serialization/deserialization");
+    }
+
+    @Test
+    void testCorruptedCompleteMarkerFails() throws IOException {
+        SegmentFooter validFooter = SegmentFooter.create(5, 1000L, 5000L);
+        byte[] bytes = validFooter.toBytes();
+
+        // Corrupt marker field (8 bytes at position 20)
+        bytes[20] = 0x00;
+        bytes[21] = 0x00;
+        bytes[22] = 0x00;
+        bytes[23] = 0x00;
+        bytes[24] = 0x00;
+        bytes[25] = 0x00;
+        bytes[26] = 0x00;
+        bytes[27] = 0x00;
+
+        SegmentFooter corrupted = SegmentFooter.fromBytes(bytes);
+
+        assertFalse(corrupted.isValid(),
+                "Footer with corrupted marker should fail checksum validation");
+        assertNotEquals(0xDEADBEEFL, corrupted.completeMarker(),
+                "Corrupted marker should not equal expected value");
+    }
+
+    @Test
+    void testCompleteMarkerByteOrder() throws IOException {
+        SegmentFooter footer = SegmentFooter.create(1, 100L, 200L);
+        byte[] bytes = footer.toBytes();
+
+        // Deserialize and verify marker comes back correctly
+        SegmentFooter deserialized = SegmentFooter.fromBytes(bytes);
+
+        assertEquals(0xDEADBEEFL, deserialized.completeMarker(),
+                "Marker should deserialize correctly (byte order validated)");
+        assertTrue(deserialized.isValid(), "Valid footer should pass checksum");
+    }
+
+    @Test
     void testMultipleFooters() throws Exception {
         SegmentFooter f1 = SegmentFooter.create(100, 1000L, 2000L);
         SegmentFooter f2 = SegmentFooter.create(200, 2000L, 3000L);

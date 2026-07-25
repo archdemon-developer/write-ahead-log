@@ -14,6 +14,7 @@ import io.writeahead.log.models.segment.SegmentMetadata;
 import io.writeahead.log.models.wal.WalConfiguration;
 import io.writeahead.log.models.wal.WalMetadata;
 import io.writeahead.log.serdes.EntrySerdes;
+import io.writeahead.log.storage.SegmentStore;
 import io.writeahead.log.utils.Crc32Utils;
 import io.writeahead.log.utils.FileUtils;
 
@@ -22,7 +23,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
-public class SegmentStoreManager {
+public class SegmentStoreManager implements SegmentStore {
 
     private static final Logger log = LoggerFactory.getLogger(SegmentStoreManager.class);
 
@@ -40,7 +41,7 @@ public class SegmentStoreManager {
     private long currentMinTimestamp;
     private long currentMaxTimestamp;
 
-    private final List<LogEntry> writeBatch;
+    private final List<LogEntry> batch;
     private FsyncExecutor fsyncExecutor;
     private final FsyncRetryStrategy fsyncRetryStrategy;
     private final SimpleWalMetrics metrics = new SimpleWalMetrics();
@@ -65,7 +66,7 @@ public class SegmentStoreManager {
         this.currentMinTimestamp = Long.MAX_VALUE;
         this.currentMaxTimestamp = Long.MIN_VALUE;
 
-        this.writeBatch = new ArrayList<>();
+        this.batch = new ArrayList<>();
         this.fsyncRetryStrategy = FsyncRetryStrategyFactory.create(config, metrics);
         this.fsyncExecutor = FsyncExecutorFactory.create(config.fsyncStrategy(), fsyncRetryStrategy, currentStream);
 
@@ -76,15 +77,33 @@ public class SegmentStoreManager {
     }
 
     public void append(LogEntry entry) throws IOException {
-        writeBatch.add(entry);
+        if (!isOpen) {
+            log.error("SegmentStoreManager is closed, exiting.");
+            throw new IOException("SegmentStoreManager is closed");
+        }
 
-        if (writeBatch.size() >= config.batchSize()) {
-            flushBatch();
+        batch.add(entry);
+
+        if (batch.size() >= config.batchSize()) {
+            flushAndFsync();
         }
     }
 
-    private void flushBatch() throws IOException {
-        for (LogEntry entry : writeBatch) {
+    public void writeBatch() throws IOException {
+        if (batch.isEmpty()) {
+            log.debug("writeBatch called but batch is empty, nothing to flush");
+            return;
+        }
+
+        flushAndFsync();
+    }
+
+    private void flushAndFsync() throws IOException {
+        if (batch.isEmpty()) {
+            return;
+        }
+
+        for (LogEntry entry : batch) {
             long crc = Crc32Utils.computeEntryCrc(entry.timestamp(), entry.data().length, entry.data());
             byte[] entryBytes = EntrySerdes.serializeEntryWithCrc(entry.timestamp(), entry.data().length, entry.data(), crc);
             FileUtils.writeToStream(currentStream, entryBytes);
@@ -99,14 +118,14 @@ public class SegmentStoreManager {
         }
 
         fsyncExecutor.onBatchComplete();
-        writeBatch.clear();
+        batch.clear();
 
         if (currentStreamSize >= config.maxSegmentSize()) {
             rotateSegment();
         }
     }
 
-    public List<LogEntry> readAllEntries() throws IOException {
+    public List<LogEntry> readAllSegments() throws IOException {
         List<LogEntry> allEntries = new ArrayList<>();
 
         for(SegmentMetadata metadata : segments) {
@@ -132,15 +151,28 @@ public class SegmentStoreManager {
     }
 
     public void close() throws IOException {
-        flushBatch();
-
         if (!isOpen) {
             return;
         }
 
-        lifecycleManager.closeSegment(currentStream, currentEntryCount,
-                currentMinTimestamp, currentMaxTimestamp);
-        isOpen = false;
+        try {
+            writeBatch();
+            lifecycleManager.closeSegment(currentStream, currentEntryCount,
+                    currentMinTimestamp, currentMaxTimestamp);
+
+            SegmentMetadata currentMetadata = new SegmentMetadata(
+                    SegmentLifecycleManager.generateSegmentFilename(currentSequenceNumber),
+                    currentSequenceNumber,
+                    System.currentTimeMillis(),
+                    currentStreamSize,
+                    currentEntryCount,
+                    currentMinTimestamp,
+                    currentMaxTimestamp
+            );
+            segments.add(currentMetadata);
+        } finally {
+            isOpen = false;
+        }
 
         log.info("SegmentStoreManager closed: finalized segment {} with {} entries",
                 currentSequenceNumber, currentEntryCount);
@@ -188,7 +220,7 @@ public class SegmentStoreManager {
     }
 
     public List<LogEntry> readAllAfterTimestamp(long timestamp) throws IOException {
-        List<LogEntry> allEntries = readAllEntries();
+        List<LogEntry> allEntries = readAllSegments();
         List<LogEntry> filtered = new ArrayList<>();
 
         for(LogEntry entry : allEntries) {
@@ -219,6 +251,11 @@ public class SegmentStoreManager {
             segments.remove(segmentMetadata);
             log.info("Truncated segment: {}", segmentMetadata.filename());
         }
+    }
+
+    @Override
+    public SimpleWalMetrics getMetrics() {
+        return metrics;
     }
 
     public List<SegmentMetadata> getSegments() {

@@ -2,6 +2,7 @@ package io.writeahead.log.segments;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import io.writeahead.log.constants.WalConstants;
 import io.writeahead.log.models.file.FileStream;
 import io.writeahead.log.models.segment.SegmentFooter;
 import io.writeahead.log.models.segment.SegmentHeader;
@@ -117,7 +118,7 @@ public class SegmentLifecycleManagerTest {
         byte[] allBytes = Files.readAllBytes(files[0].toPath());
 
         // Footer is last 28 bytes
-        int footerSize = 28;
+        int footerSize = WalConstants.SEGMENT_FOOTER_SIZE;
         assertTrue(allBytes.length >= 48 + footerSize, "File should have header + footer");
 
         // Read footer from file
@@ -212,7 +213,7 @@ public class SegmentLifecycleManagerTest {
         // Verify each has proper structure
         for (File file : files) {
             byte[] data = Files.readAllBytes(file.toPath());
-            assertTrue(data.length >= 48 + 28, "Each segment should have header + footer");
+            assertTrue(data.length >= 48 + WalConstants.SEGMENT_FOOTER_SIZE, "Each segment should have header + footer");
         }
     }
 
@@ -264,8 +265,8 @@ public class SegmentLifecycleManagerTest {
         byte[] allBytes = Files.readAllBytes(files[0].toPath());
 
         // Read footer
-        byte[] footerBytes = new byte[28];
-        System.arraycopy(allBytes, allBytes.length - 28, footerBytes, 0, 28);
+        byte[] footerBytes = new byte[WalConstants.SEGMENT_FOOTER_SIZE];
+        System.arraycopy(allBytes, allBytes.length - WalConstants.SEGMENT_FOOTER_SIZE, footerBytes, 0, WalConstants.SEGMENT_FOOTER_SIZE);
         SegmentFooter footer = SegmentFooter.fromBytes(footerBytes);
 
         assertEquals(0, footer.entryCount(), "Should allow 0 entries");
