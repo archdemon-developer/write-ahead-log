@@ -1,4 +1,4 @@
-package io.writeahead.log.storage;
+package io.writeahead.log.segments;
 
 import io.writeahead.log.metrics.SimpleWalMetrics;
 import io.writeahead.log.models.LogEntry;

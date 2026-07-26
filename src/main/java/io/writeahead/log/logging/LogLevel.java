@@ -1,4 +1,4 @@
-package io.writeahead.log.enums;
+package io.writeahead.log.logging;
 
 public enum LogLevel {
   DEBUG(0),

@@ -1,6 +1,11 @@
 package io.writeahead.log.metrics;
 
-import java.util.concurrent.atomic.AtomicInteger;
+import io.writeahead.log.exceptions.CorruptionType;
+import io.writeahead.log.exceptions.ErrorContext;
+
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+
 import java.util.concurrent.atomic.AtomicLong;
 
 public class SimpleWalMetrics implements WalMetrics, WalPerformanceMetrics {
@@ -15,6 +20,15 @@ public class SimpleWalMetrics implements WalMetrics, WalPerformanceMetrics {
   private final AtomicLong totalFsyncLatencyMs = new AtomicLong(0);
   private final long startTimeMs = System.currentTimeMillis();
   private final AtomicLong lastFsyncTimeMs = new AtomicLong(0);
+
+  private final Map<String, Long> fsyncTransientErrorCounts = new ConcurrentHashMap<>();
+  private final Map<String, Long> fsyncPermanentErrorCounts = new ConcurrentHashMap<>();
+  private final AtomicLong segmentCorruptionCount = new AtomicLong(0);
+  private final Map<String, Long> corruptionTypeCounts = new ConcurrentHashMap<>();
+  private final AtomicLong segmentQuarantinedCount = new AtomicLong(0);
+  private final AtomicLong segmentRecoveryErrorCount = new AtomicLong(0);
+  private final Map<String, Long> alertCounts = new ConcurrentHashMap<>();
+  private final AtomicLong fsyncRetrySuccessCount = new AtomicLong(0);
 
   public void recordEntryWritten(int size) {
     entriesWritten.incrementAndGet();
@@ -100,5 +114,65 @@ public class SimpleWalMetrics implements WalMetrics, WalPerformanceMetrics {
   @Override
   public long getLastFsyncTimeMs() {
     return lastFsyncTimeMs.get();
+  }
+
+  public void recordFsyncTransientFailure(ErrorContext context) {
+    fsyncTransientErrorCounts.merge(context.name(), 1L, Long::sum);
+  }
+
+  public void recordFsyncPermanentFailure(ErrorContext context) {
+    fsyncPermanentErrorCounts.merge(context.name(), 1L, Long::sum);
+  }
+
+  public void recordFsyncRetrySuccess(int attempts) {
+    fsyncRetrySuccessCount.incrementAndGet();
+  }
+
+  public void recordSegmentCorruption() {
+    segmentCorruptionCount.incrementAndGet();
+  }
+
+  public void recordCorruptionType(CorruptionType type) {
+    corruptionTypeCounts.merge(type.name(), 1L, Long::sum);
+  }
+
+  public void recordSegmentQuarantined() {
+    segmentQuarantinedCount.incrementAndGet();
+  }
+
+  public void recordSegmentRecoveryError() {
+    segmentRecoveryErrorCount.incrementAndGet();
+  }
+
+  public Map<String, Long> getFsyncTransientErrorCounts() {
+    return new ConcurrentHashMap<>(fsyncTransientErrorCounts);
+  }
+
+  public Map<String, Long> getFsyncPermanentErrorCounts() {
+    return new ConcurrentHashMap<>(fsyncPermanentErrorCounts);
+  }
+
+  public long getSegmentCorruptionCount() {
+    return segmentCorruptionCount.get();
+  }
+
+  public Map<String, Long> getCorruptionTypeCounts() {
+    return new ConcurrentHashMap<>(corruptionTypeCounts);
+  }
+
+  public long getSegmentQuarantinedCount() {
+    return segmentQuarantinedCount.get();
+  }
+
+  public long getSegmentRecoveryErrorCount() {
+    return segmentRecoveryErrorCount.get();
+  }
+
+  public Map<String, Long> getAlertCounts() {
+    return new ConcurrentHashMap<>(alertCounts);
+  }
+
+  public long getFsyncRetrySuccessCount() {
+    return fsyncRetrySuccessCount.get();
   }
 }

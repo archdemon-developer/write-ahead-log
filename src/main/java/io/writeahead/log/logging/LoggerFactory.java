@@ -1,7 +1,5 @@
 package io.writeahead.log.logging;
 
-import io.writeahead.log.enums.LogLevel;
-
 public class LoggerFactory {
   private static LogLevel globalMinLevel = LogLevel.INFO;
 

@@ -2,7 +2,7 @@ package io.writeahead.log.models;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-import io.writeahead.log.enums.FsyncStrategy;
+import io.writeahead.log.fsync.FsyncStrategy;
 import java.nio.file.Files;
 import java.nio.file.Path;
 

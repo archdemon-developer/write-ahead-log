@@ -3,9 +3,6 @@ package io.writeahead.log.segments;
 import io.writeahead.log.constants.WalConstants;
 import io.writeahead.log.logging.Logger;
 import io.writeahead.log.logging.LoggerFactory;
-import io.writeahead.log.models.segment.SegmentFooter;
-import io.writeahead.log.models.segment.SegmentHeader;
-import io.writeahead.log.models.segment.SegmentMetadata;
 import io.writeahead.log.models.wal.WalMetadata;
 import io.writeahead.log.utils.FileUtils;
 

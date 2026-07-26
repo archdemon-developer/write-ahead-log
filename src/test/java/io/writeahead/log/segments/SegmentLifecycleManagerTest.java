@@ -4,8 +4,6 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import io.writeahead.log.constants.WalConstants;
 import io.writeahead.log.models.file.FileStream;
-import io.writeahead.log.models.segment.SegmentFooter;
-import io.writeahead.log.models.segment.SegmentHeader;
 import io.writeahead.log.utils.FileUtils;
 import java.io.File;
 import java.io.IOException;

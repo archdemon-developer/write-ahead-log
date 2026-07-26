@@ -1,6 +1,6 @@
 package io.writeahead.log.models.wal;
 
-import io.writeahead.log.models.segment.SegmentMetadata;
+import io.writeahead.log.segments.SegmentMetadata;
 
 import java.util.List;
 

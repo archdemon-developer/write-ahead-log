@@ -1,6 +1,6 @@
 package io.writeahead.log.fsync.factory;
 
-import io.writeahead.log.enums.FsyncStrategy;
+import io.writeahead.log.fsync.FsyncStrategy;
 import io.writeahead.log.fsync.FsyncExecutor;
 import io.writeahead.log.fsync.FsyncRetryStrategy;
 import io.writeahead.log.fsync.executor.EveryBatchFsyncExecutor;

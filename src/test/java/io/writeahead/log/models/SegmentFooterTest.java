@@ -3,7 +3,7 @@ package io.writeahead.log.models;
 import static org.junit.jupiter.api.Assertions.*;
 
 import io.writeahead.log.constants.WalConstants;
-import io.writeahead.log.models.segment.SegmentFooter;
+import io.writeahead.log.segments.SegmentFooter;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;

@@ -3,7 +3,6 @@ package io.writeahead.log.segments;
 import static org.junit.jupiter.api.Assertions.*;
 
 import io.writeahead.log.models.LogEntry;
-import io.writeahead.log.models.segment.SegmentMetadata;
 import io.writeahead.log.models.wal.WalConfiguration;
 
 import java.io.File;
@@ -11,8 +10,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.atomic.AtomicInteger;
+
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

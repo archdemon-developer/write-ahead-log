@@ -8,7 +8,7 @@
 //import io.writeahead.log.models.LogEntry;
 //import io.writeahead.log.models.wal.WalConfiguration;
 //import io.writeahead.log.segments.SegmentStoreManager;
-//import io.writeahead.log.storage.SegmentStore;
+//import io.writeahead.log.segments.SegmentStore;
 //
 //import java.io.IOException;
 //import java.util.ArrayList;

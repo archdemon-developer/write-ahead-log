@@ -10,11 +10,9 @@ import io.writeahead.log.logging.LoggerFactory;
 import io.writeahead.log.metrics.SimpleWalMetrics;
 import io.writeahead.log.models.LogEntry;
 import io.writeahead.log.models.file.FileStream;
-import io.writeahead.log.models.segment.SegmentMetadata;
 import io.writeahead.log.models.wal.WalConfiguration;
 import io.writeahead.log.models.wal.WalMetadata;
 import io.writeahead.log.serdes.EntrySerdes;
-import io.writeahead.log.storage.SegmentStore;
 import io.writeahead.log.utils.Crc32Utils;
 import io.writeahead.log.utils.FileUtils;
 
