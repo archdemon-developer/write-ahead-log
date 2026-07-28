@@ -1,10 +1,14 @@
 package io.writeahead.log.segments;
 
 import io.writeahead.log.constants.WalConstants;
+import io.writeahead.log.exceptions.CorruptionException;
+import io.writeahead.log.exceptions.CorruptionType;
+import io.writeahead.log.exceptions.RecoveryType;
 import io.writeahead.log.logging.Logger;
 import io.writeahead.log.logging.LoggerFactory;
 import io.writeahead.log.models.wal.WalMetadata;
 import io.writeahead.log.utils.FileUtils;
+import io.writeahead.log.utils.WalErrorClassifier;
 
 import java.io.File;
 import java.io.IOException;
@@ -47,9 +51,12 @@ public class SegmentMetadataRecovery {
                     log.debug("Recovered segment: {} (seq: {}, entries: {})",
                             logFile.getName(), segMeta.sequenceNumber(), segMeta.entryCount());
                 }
-            } catch (IOException ex) {
-                log.error("Error recovering segment {}: {}", logFile.getName(), ex.getMessage());
-            }
+            } catch (CorruptionException ex) {
+            log.error("Corruption in segment {}: {} (offset: {}, type: {})",
+                    logFile.getName(), ex.getMessage(), ex.byteOffset(), ex.corruptionType());
+        } catch (IOException ex) {
+            log.error("IO error recovering segment {}: {}", logFile.getName(), ex.getMessage());
+        }
         }
         String lastActiveSegment = segments.isEmpty() ? null : segments.getLast().filename();
         long nextSequence = maxSequenceFromHeaders + 1;
@@ -64,21 +71,24 @@ public class SegmentMetadataRecovery {
         long fileSize = FileUtils.getFileSize(segmentFile);
 
         if(fileSize < 84) {
-            log.warn("Segment too small: {} ({} bytes), skipping", segmentFile.getName(), fileSize);
-            return null;
+            throw WalErrorClassifier.classifyRecoveryError(
+                    RecoveryType.SEGMENT_TOO_SMALL,
+                    "Segment " + segmentFile.getName() + " is only " + fileSize + " bytes");
         }
 
         byte[] headerBytes = FileUtils.readBytes(segmentFile, 0, WalConstants.SEGMENT_HEADER_SIZE);
         SegmentHeader header = SegmentHeader.fromBytes(headerBytes);
 
         if(!header.isValid()) {
-            log.warn("Segment header is invalid (checksum mismatch): {}, skipping", segmentFile.getName());
-            return null;
+            throw WalErrorClassifier.classifyCorruption(segmentFile.getName(), 0,
+                    CorruptionType.HEADER_CRC_MISMATCH, header.computedChecksum(), header.checksum(),
+                    "Header CRC validation failed");
         }
 
         if(header.magic() != (byte) 0xAA) {
-            log.warn("Segment header invalid (magic byte mismatch): {}, skipping", segmentFile.getName());
-            return null;
+            throw WalErrorClassifier.classifyCorruption(
+                    segmentFile.getName(), 0, CorruptionType.INVALID_MAGIC,
+                    header.magic(), 0xAA, "Header magic byte mismatch");
         }
 
         byte[] footerBytes = FileUtils.readBytes(segmentFile, fileSize - WalConstants.SEGMENT_FOOTER_SIZE,
@@ -86,8 +96,9 @@ public class SegmentMetadataRecovery {
         SegmentFooter footer = SegmentFooter.fromBytes(footerBytes);
 
         if (!footer.isValid()) {
-            log.warn("Segment footer invalid (checksum mismatch): {}, skipping", segmentFile.getName());
-            return null;
+            throw WalErrorClassifier.classifyCorruption(
+                    segmentFile.getName(), 0, CorruptionType.FOOTER_CRC_MISMATCH,
+                    footer.computedChecksum(), footer.checksum(), "Footer CRC validation failed");
         }
 
         return new SegmentMetadata(

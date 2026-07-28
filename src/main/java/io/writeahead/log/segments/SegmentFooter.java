@@ -80,4 +80,8 @@ public record SegmentFooter(
                 + '}';
     }
 
+    public long computedChecksum() throws IOException {
+        return calculateChecksum(entryCount, minTimestamp, maxTimestamp, completeMarker);
+    }
+
 }

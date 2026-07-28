@@ -4,6 +4,7 @@ import io.writeahead.log.logging.Logger;
 import io.writeahead.log.logging.LoggerFactory;
 import io.writeahead.log.models.file.FileStream;
 import io.writeahead.log.utils.FileUtils;
+import io.writeahead.log.utils.WalErrorClassifier;
 
 import java.io.File;
 import java.io.IOException;
@@ -36,7 +37,7 @@ public class SegmentLifecycleManager {
             return FileUtils.openAppendStream(segmentFile);
         } catch (IOException e) {
             deleteFile(segmentFile, filename);
-            throw e;
+            throw WalErrorClassifier.classifyIOException(e, "create new segment file");
         }
     }
 
@@ -45,8 +46,16 @@ public class SegmentLifecycleManager {
         try {
             SegmentFooter footer = SegmentFooter.create(entryCount, minTimestamp, maxTimestamp);
             byte[] footerBytes = footer.toBytes();
-            FileUtils.writeToStream(currentStream, footerBytes);
-            FileUtils.fsyncStream(currentStream);
+            try {
+                FileUtils.writeToStream(currentStream, footerBytes);
+            } catch (IOException ex) {
+                throw WalErrorClassifier.classifyIOException(ex, "write footer to segment");
+            }
+            try {
+                FileUtils.fsyncStream(currentStream);
+            } catch (IOException ex) {
+                throw WalErrorClassifier.classifyIOException(ex, "fsync footer to disk");
+            }
         } finally {
             FileUtils.closeStream(currentStream);  // ALWAYS closes
         }

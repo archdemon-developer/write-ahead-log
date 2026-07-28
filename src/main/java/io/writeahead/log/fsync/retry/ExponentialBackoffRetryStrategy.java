@@ -1,10 +1,12 @@
 package io.writeahead.log.fsync.retry;
 
+import io.writeahead.log.exceptions.WalException;
 import io.writeahead.log.fsync.FsyncOperation;
 import io.writeahead.log.fsync.FsyncRetryStrategy;
 import io.writeahead.log.logging.Logger;
 import io.writeahead.log.logging.LoggerFactory;
 import io.writeahead.log.metrics.SimpleWalMetrics;
+import io.writeahead.log.utils.WalErrorClassifier;
 
 import java.io.IOException;
 
@@ -43,18 +45,15 @@ public class ExponentialBackoffRetryStrategy implements FsyncRetryStrategy {
         }
         return;
       } catch (IOException ex) {
-        lastException = ex;
-        if (attempt < maxRetries) {
+        WalException walEx = WalErrorClassifier.classifyIOException(ex, "fsync");
+
+        if (walEx.isTransient() && attempt < maxRetries) {
           long waitMs = (long) (retryBackoffMs * Math.pow(retryBackoffMultiplier, attempt));
-          log.warn(
-              "Fsync attempt {}/{} failed, retrying in {}ms: {}",
-              attempt + 1,
-              maxRetries + 1,
-              waitMs,
-              ex.getMessage());
+          log.warn("Fsync attempt {}/{} failed (transient), retrying in {}ms: {}",
+                  attempt + 1, maxRetries + 1, waitMs, ex.getMessage());
           sleep(waitMs);
         } else {
-          log.error("Fsync failed on final attempt {}/{}: {}", attempt + 1, maxRetries + 1, ex);
+          throw walEx;
         }
       }
     }

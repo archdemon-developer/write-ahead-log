@@ -69,7 +69,6 @@ public record SegmentHeader(
     }
 
     private static long calculateChecksum(byte magic, byte version, long createdAt, long segmentSequence, byte[] reserved) throws IOException {
-        ;
 
         try (ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
              DataOutputStream dataOutputStream = new DataOutputStream(byteArrayOutputStream)) {
@@ -95,5 +94,9 @@ public record SegmentHeader(
                 + ", checksum=" + checksum
                 + ", valid=" + isValid()
                 + '}';
+    }
+
+    public long computedChecksum() throws IOException {
+        return calculateChecksum(magic, version, createdAt, segmentSequence, reserved);
     }
 }

@@ -1,10 +1,12 @@
 package io.writeahead.log.segments;
 
+import io.writeahead.log.exceptions.CorruptionType;
 import io.writeahead.log.logging.Logger;
 import io.writeahead.log.logging.LoggerFactory;
 import io.writeahead.log.models.LogEntry;
 import io.writeahead.log.serdes.EntrySerdes;
 import io.writeahead.log.utils.Crc32Utils;
+import io.writeahead.log.utils.WalErrorClassifier;
 
 import java.io.*;
 import java.util.ArrayList;
@@ -33,11 +35,9 @@ public class SegmentEntriesReader {
                     long computedCrc = Crc32Utils.computeEntryCrc(timestamp, size, data);
 
                     if (computedCrc != storedCrc) {
-                        log.error("Entry corruption at entry {}: computed CRC {} != stored CRC {}",
-                                entriesRead, computedCrc, storedCrc);
-                        hasCorruption = true;
-                        corruptionAtEntry = entriesRead;
-                        break;
+                        throw WalErrorClassifier.classifyCorruption(
+                                "unknown-segment", 0, CorruptionType.ENTRY_CRC_MISMATCH,
+                                computedCrc, storedCrc, "Entry CRC mismatch at entry " + entriesRead);
                     }
 
                     logEntries.add(new LogEntry(size, data, timestamp));

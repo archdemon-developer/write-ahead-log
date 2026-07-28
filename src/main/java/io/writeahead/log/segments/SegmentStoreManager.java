@@ -1,6 +1,7 @@
 package io.writeahead.log.segments;
 
 import io.writeahead.log.constants.WalConstants;
+import io.writeahead.log.exceptions.CorruptionException;
 import io.writeahead.log.fsync.FsyncExecutor;
 import io.writeahead.log.fsync.FsyncRetryStrategy;
 import io.writeahead.log.fsync.factory.FsyncExecutorFactory;
@@ -15,6 +16,7 @@ import io.writeahead.log.models.wal.WalMetadata;
 import io.writeahead.log.serdes.EntrySerdes;
 import io.writeahead.log.utils.Crc32Utils;
 import io.writeahead.log.utils.FileUtils;
+import io.writeahead.log.utils.WalErrorClassifier;
 
 import java.io.File;
 import java.io.IOException;
@@ -76,8 +78,8 @@ public class SegmentStoreManager implements SegmentStore {
 
     public void append(LogEntry entry) throws IOException {
         if (!isOpen) {
-            log.error("SegmentStoreManager is closed, exiting.");
-            throw new IOException("SegmentStoreManager is closed");
+            throw WalErrorClassifier.classifyIOException(
+                    new IOException("SegmentStoreManager is closed"), "append to closed WAL");
         }
 
         batch.add(entry);
@@ -104,18 +106,30 @@ public class SegmentStoreManager implements SegmentStore {
         for (LogEntry entry : batch) {
             long crc = Crc32Utils.computeEntryCrc(entry.timestamp(), entry.data().length, entry.data());
             byte[] entryBytes = EntrySerdes.serializeEntryWithCrc(entry.timestamp(), entry.data().length, entry.data(), crc);
-            FileUtils.writeToStream(currentStream, entryBytes);
+            try {
+                FileUtils.writeToStream(currentStream, entryBytes);
+            } catch (IOException ex) {
+                throw WalErrorClassifier.classifyIOException(ex, "write entry to segment");
+            }
 
             currentStreamSize += entryBytes.length;
             currentEntryCount++;
             currentMinTimestamp = Math.min(currentMinTimestamp, entry.timestamp());
             currentMaxTimestamp = Math.max(currentMaxTimestamp, entry.timestamp());
 
-            fsyncExecutor.onEntryWritten();
+            try {
+                fsyncExecutor.onEntryWritten();
+            } catch (IOException ex) {
+                throw WalErrorClassifier.classifyIOException(ex, "fsync after entry write");
+            }
             metrics.recordEntryWritten(entry.data().length);
         }
 
-        fsyncExecutor.onBatchComplete();
+        try {
+            fsyncExecutor.onBatchComplete();
+        } catch (IOException ex) {
+            throw WalErrorClassifier.classifyIOException(ex, "fsync after batch complete");
+        }
         batch.clear();
 
         if (currentStreamSize >= config.maxSegmentSize()) {
@@ -136,11 +150,11 @@ public class SegmentStoreManager implements SegmentStore {
             byte[] allBytes = FileUtils.readAllBytes(segmentFile);
             byte[] entryRegionBytes = extractEntryRegion(allBytes);
 
-            SegmentEntriesReader.SegmentReadResult result = segmentReader.readEntriesFromRegion(entryRegionBytes);
-            allEntries.addAll(result.entries());
-
-            if(result.hasCorruption()) {
-                log.warn("Corruption detected in segment {} at entry {}", metadata.filename(), result.corruptionAtEntry());
+            try {
+                SegmentEntriesReader.SegmentReadResult result = segmentReader.readEntriesFromRegion(entryRegionBytes);
+                allEntries.addAll(result.entries());
+            } catch (CorruptionException ex) {
+                log.error("Corruption detected in segment {}: {}", metadata.filename(), ex.getMessage());
             }
         }
 
@@ -177,7 +191,11 @@ public class SegmentStoreManager implements SegmentStore {
     }
 
     private void rotateSegment() throws IOException {
-        lifecycleManager.finalizeSegment(currentStream, currentEntryCount, currentMinTimestamp, currentMaxTimestamp);
+        try {
+            lifecycleManager.finalizeSegment(currentStream, currentEntryCount, currentMinTimestamp, currentMaxTimestamp);
+        }  catch (IOException ex) {
+            throw WalErrorClassifier.classifyIOException(ex, "finalize segment during rotation");
+        }
 
         SegmentMetadata completedMetadata = new SegmentMetadata(
                 SegmentLifecycleManager.generateSegmentFilename(currentSequenceNumber),
@@ -191,7 +209,11 @@ public class SegmentStoreManager implements SegmentStore {
 
         segments.add(completedMetadata);
         currentSequenceNumber = nextSegmentSequence++;
-        this.currentStream = lifecycleManager.createNewSegment(currentSequenceNumber);
+        try {
+            this.currentStream = lifecycleManager.createNewSegment(currentSequenceNumber);
+        } catch (IOException ex) {
+            throw WalErrorClassifier.classifyIOException(ex, "create new segment during rotation");
+        }
         this.currentStreamSize = WalConstants.SEGMENT_HEADER_SIZE;
         this.currentEntryCount = 0;
         this.currentMinTimestamp = Long.MAX_VALUE;
@@ -245,9 +267,13 @@ public class SegmentStoreManager implements SegmentStore {
 
         for(SegmentMetadata segmentMetadata : toDelete) {
             File segmentFile = new File(config.logDir(), segmentMetadata.filename());
-            FileUtils.deleteFile(segmentFile);
-            segments.remove(segmentMetadata);
-            log.info("Truncated segment: {}", segmentMetadata.filename());
+            try {
+                FileUtils.deleteFile(segmentFile);
+                segments.remove(segmentMetadata);
+                log.info("Truncated segment: {}", segmentMetadata.filename());
+            } catch (IOException ex) {
+                log.error("Failed to delete segment {}: {}", segmentMetadata.filename(), ex.getMessage());
+            }
         }
     }
 
