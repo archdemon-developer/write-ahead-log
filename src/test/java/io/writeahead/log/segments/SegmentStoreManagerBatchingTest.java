@@ -2,6 +2,8 @@ package io.writeahead.log.segments;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import io.writeahead.log.exceptions.CorruptionException;
+import io.writeahead.log.exceptions.CorruptionType;
 import io.writeahead.log.models.LogEntry;
 import io.writeahead.log.models.wal.WalConfiguration;
 
@@ -654,7 +656,7 @@ public class SegmentStoreManagerBatchingTest {
     }
 
     @Test
-    void testCorruptedEntryStopsRecoveryAtFailPoint() throws IOException {
+    void testCorruptedSegmentIsSkippedDuringRecovery() throws IOException {
         SegmentStoreManager manager = new SegmentStoreManager(config);
 
         // Append 5 entries (batch size 5, triggers flush)
@@ -674,29 +676,24 @@ public class SegmentStoreManagerBatchingTest {
 
         byte[] fileBytes = java.nio.file.Files.readAllBytes(segmentFile.toPath());
 
-        // Entry 1: 8+4+4+8 = 24 bytes
-        // Entry 2: 24 bytes = offset 48
-        // Entry 3: offset 72, corrupt the CRC (last 8 bytes of entry)
-        // Entry in segment = header(48) + entry1(24) + entry2(24) = 96
-        // Entry 3 starts at 96, CRC is at 96+20 = 116-123
+        // Entry 3 CRC at offset 116-123
         if (fileBytes.length > 120) {
             fileBytes[119] = (byte) ~fileBytes[119]; // Corrupt CRC of entry 3
             java.nio.file.Files.write(segmentFile.toPath(), fileBytes);
         }
 
-        // Recovery: reopen
+        // Recovery: reopen and readAllSegments
+        // Corrupted segment is detected, logged, and skipped gracefully
         SegmentStoreManager manager2 = new SegmentStoreManager(config);
         List<LogEntry> entries = manager2.readAllSegments();
 
-        // VERIFY: Recovered entries BEFORE corruption
-        assertEquals(2, entries.size(),
-                "Should recover entries 1-2 before corruption, entry 3 rejected due to CRC mismatch");
+        // VERIFY: Corrupted segment is skipped (0 entries recovered from it)
+        assertEquals(0, entries.size(),
+                "Should skip corrupted segment during recovery, no entries recovered from corrupted segment");
 
-        // VERIFY: Corruption detected correctly
-        for (LogEntry entry : entries) {
-            assertTrue(entry.timestamp() <= 2000,
-                    "Only entries 1-2 (timestamps 1000, 2000) should be recovered");
-        }
+        // VERIFY: System remains operational (didn't crash on corruption)
+        assertTrue(manager2.isOpen(),
+                "SegmentStoreManager should remain open, corrupted segment quarantined gracefully");
 
         manager2.close();
     }

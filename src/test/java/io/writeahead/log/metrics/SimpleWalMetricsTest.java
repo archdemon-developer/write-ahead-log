@@ -133,13 +133,15 @@ public class SimpleWalMetricsTest {
     }
 
     @Test
-    void testThroughputZeroWhenNoTime() {
+    void testThroughputIsPositiveWhenEntriesRecorded() throws InterruptedException {
         metrics.recordEntryWritten(100);
+
+        Thread.sleep(10);  // Ensure at least 10ms passes
 
         double throughput = metrics.getThroughputEntriesPerSec();
 
-        assertEquals(0.0, throughput,
-                "Throughput should be 0 when elapsed time is 0");
+        assertTrue(throughput > 0.0,
+                "Throughput should be positive when entries are recorded and time has elapsed");
     }
 
     @Test

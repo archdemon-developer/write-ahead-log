@@ -2,6 +2,8 @@ package io.writeahead.log.segments;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import io.writeahead.log.exceptions.CorruptionException;
+import io.writeahead.log.exceptions.CorruptionType;
 import io.writeahead.log.models.LogEntry;
 import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
@@ -50,11 +52,11 @@ public class SegmentEntriesReaderTest {
         // Corrupt the CRC (last 8 bytes)
         entryRegion[entryRegion.length - 1] = (byte) ~entryRegion[entryRegion.length - 1];
 
-        SegmentEntriesReader.SegmentReadResult result = reader.readEntriesFromRegion(entryRegion);
+        CorruptionException ex = assertThrows(CorruptionException.class,
+                () -> reader.readEntriesFromRegion(entryRegion));
 
-        assertEquals(0, result.entries().size(), "Should not return corrupted entry");
-        assertTrue(result.hasCorruption(), "Should detect corruption");
-        assertEquals(0, result.corruptionAtEntry(), "Corruption at entry 0");
+        assertEquals(CorruptionType.ENTRY_CRC_MISMATCH, ex.corruptionType());
+        assertTrue(ex.getMessage().contains("Entry CRC mismatch"));
     }
 
     @Test
@@ -65,17 +67,16 @@ public class SegmentEntriesReaderTest {
                 new LogEntry(2, "e3".getBytes(), 3000L));
 
         // Corrupt the second entry's CRC
-        // 22 bytes
         int secondEntryStart = 8 + 4 + 2 + 8;
         int secondEntryCrcPos = secondEntryStart + 8 + 4 + 2;
         entryRegion[secondEntryCrcPos + 1] = (byte) ~entryRegion[secondEntryCrcPos + 1];
         entryRegion[secondEntryCrcPos] = (byte) ~entryRegion[secondEntryCrcPos];
 
-        SegmentEntriesReader.SegmentReadResult result = reader.readEntriesFromRegion(entryRegion);
+        CorruptionException ex = assertThrows(CorruptionException.class,
+                () -> reader.readEntriesFromRegion(entryRegion));
 
-        assertEquals(1, result.entries().size(), "Should have read only 1 entry before corruption");
-        assertTrue(result.hasCorruption(), "Should detect corruption");
-        assertEquals(1, result.corruptionAtEntry(), "Corruption at entry 1");
+        assertEquals(CorruptionType.ENTRY_CRC_MISMATCH, ex.corruptionType());
+        assertTrue(ex.getMessage().contains("entry 1"));
     }
 
     @Test

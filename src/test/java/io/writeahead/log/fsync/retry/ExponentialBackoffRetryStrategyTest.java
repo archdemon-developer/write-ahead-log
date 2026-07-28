@@ -129,7 +129,7 @@ public class ExponentialBackoffRetryStrategyTest {
     @Test
     void testMultipleRetries() throws IOException {
         TrackingFsyncOperation operation = new TrackingFsyncOperation();
-        operation.failForAttempts(3);  // Fail 3 times, succeed on 4th
+        operation.failForAttempts(3);  // Fail 3 times with transient error, succeed on 4th
 
         strategy.executeWithRetry(operation);
 
@@ -242,11 +242,11 @@ public class ExponentialBackoffRetryStrategyTest {
             attemptCount++;
 
             if (alwaysFail) {
-                throw new IOException("Simulated fsync failure");
+                throw new IOException("Resource temporarily unavailable");
             }
 
             if (attemptCount <= failUntilAttempt) {
-                throw new IOException("Simulated fsync failure");
+                throw new IOException("Resource temporarily unavailable");
             }
         }
 
