@@ -4,175 +4,174 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import io.writeahead.log.constants.WalConstants;
 import io.writeahead.log.segments.SegmentHeader;
-import org.junit.jupiter.api.Test;
-
 import java.io.IOException;
+import org.junit.jupiter.api.Test;
 
 public class SegmentHeaderTest {
 
+    private static final long REFERENCE_TIMESTAMP = 1000000L;
+    private static final long REFERENCE_SEQUENCE = 5L;
+    private static final long LARGE_TIMESTAMP = 1234567890123L;
+    private static final long ZERO_SEQUENCE = 0L;
+    private static final long SEQUENCE_RANGE_MAX = 100L;
+    private static final byte INVALID_MAGIC_BYTE = (byte) 0xBB;
+    private static final int HEADER_SERIALIZATION_SIZE = 48;
+    private static final int UNDERSIZED_BUFFER_SIZE = 10;
+
     @Test
-    void testCreateHeader() throws Exception {
-        long createdAt = System.currentTimeMillis();
-        long sequence = 5;
+    void createHeaderProducesValidHeaderWithCorrectMagicAndVersion() throws Exception {
+        long currentTimestamp = System.currentTimeMillis();
+        long sequenceNumber = REFERENCE_SEQUENCE;
 
-        SegmentHeader header = SegmentHeader.create(createdAt, sequence);
+        SegmentHeader createdHeader = SegmentHeader.create(currentTimestamp, sequenceNumber);
 
-        assertEquals((byte) 0xAA, header.magic(), "Magic byte should be 0xAA");
-        assertEquals(0x01, header.version(), "Version should be 0x01");
-        assertEquals(createdAt, header.createdAt(), "Created timestamp should match");
-        assertEquals(sequence, header.segmentSequence(), "Sequence should match");
-        assertTrue(header.isValid(), "Header should be valid");
+        assertEquals((byte) 0xAA, createdHeader.magic());
+        assertEquals(0x01, createdHeader.version());
+        assertEquals(currentTimestamp, createdHeader.createdAt());
+        assertEquals(sequenceNumber, createdHeader.segmentSequence());
+        assertTrue(createdHeader.isValid());
     }
 
     @Test
-    void testSerializationRoundTrip() throws Exception {
-        long createdAt = 1000000L;
-        long sequence = 10;
+    void serializationAndDeserializationPreservesAllHeaderFields() throws Exception {
+        SegmentHeader originalHeader = SegmentHeader.create(REFERENCE_TIMESTAMP, REFERENCE_SEQUENCE);
+        byte[] serializedHeaderBytes = originalHeader.toBytes();
 
-        SegmentHeader original = SegmentHeader.create(createdAt, sequence);
-        byte[] bytes = original.toBytes();
+        assertEquals(HEADER_SERIALIZATION_SIZE, serializedHeaderBytes.length);
 
-        assertEquals(WalConstants.SEGMENT_HEADER_SIZE, bytes.length, "Header should be 48 bytes");
+        SegmentHeader deserializedHeader = SegmentHeader.fromBytes(serializedHeaderBytes);
 
-        SegmentHeader deserialized = SegmentHeader.fromBytes(bytes);
-
-        assertEquals(original.magic(), deserialized.magic(), "Magic should match");
-        assertEquals(original.version(), deserialized.version(), "Version should match");
-        assertEquals(original.createdAt(), deserialized.createdAt(), "Created timestamp should match");
-        assertEquals(original.segmentSequence(), deserialized.segmentSequence(), "Sequence should match");
-        assertEquals(original.checksum(), deserialized.checksum(), "Checksum should match");
-        assertTrue(deserialized.isValid(), "Deserialized header should be valid");
+        assertEquals(originalHeader.magic(), deserializedHeader.magic());
+        assertEquals(originalHeader.version(), deserializedHeader.version());
+        assertEquals(originalHeader.createdAt(), deserializedHeader.createdAt());
+        assertEquals(originalHeader.segmentSequence(), deserializedHeader.segmentSequence());
+        assertEquals(originalHeader.checksum(), deserializedHeader.checksum());
+        assertTrue(deserializedHeader.isValid());
     }
 
     @Test
-    void testInvalidMagicByte() throws Exception {
-        SegmentHeader header = SegmentHeader.create(System.currentTimeMillis(), 1);
-        byte[] bytes = header.toBytes();
+    void corruptedMagicByteRendersHeaderInvalid() throws Exception {
+        SegmentHeader validHeader = SegmentHeader.create(System.currentTimeMillis(), 1);
+        byte[] serializedHeaderBytes = validHeader.toBytes();
 
-        // Corrupt magic byte
-        bytes[0] = (byte) 0xBB;
+        serializedHeaderBytes[0] = INVALID_MAGIC_BYTE;
 
-        SegmentHeader corrupted = SegmentHeader.fromBytes(bytes);
-        assertFalse(corrupted.isValid(), "Header with wrong magic byte should be invalid");
+        SegmentHeader corruptedHeader = SegmentHeader.fromBytes(serializedHeaderBytes);
+        assertFalse(corruptedHeader.isValid());
     }
 
     @Test
-    void testChecksumValidation() throws Exception {
-        SegmentHeader header = SegmentHeader.create(System.currentTimeMillis(), 1);
-        byte[] bytes = header.toBytes();
+    void corruptedChecksumRendersHeaderInvalid() throws Exception {
+        SegmentHeader validHeader = SegmentHeader.create(System.currentTimeMillis(), 1);
+        byte[] serializedHeaderBytes = validHeader.toBytes();
 
-        // Corrupt checksum (last 8 bytes)
-        bytes[47] = (byte) ~bytes[47];
+        serializedHeaderBytes[47] = (byte) ~serializedHeaderBytes[47];
 
-        SegmentHeader corrupted = SegmentHeader.fromBytes(bytes);
-        assertFalse(corrupted.isValid(), "Header with corrupted checksum should be invalid");
+        SegmentHeader corruptedHeader = SegmentHeader.fromBytes(serializedHeaderBytes);
+        assertFalse(corruptedHeader.isValid());
     }
 
     @Test
-    void testMultipleSequenceNumbers() throws Exception {
-        for (long seq = 1; seq <= 100; seq++) {
-            SegmentHeader header = SegmentHeader.create(System.currentTimeMillis(), seq);
-            byte[] bytes = header.toBytes();
-            SegmentHeader deserialized = SegmentHeader.fromBytes(bytes);
+    void multipleSequenceNumbersSerializeAndDeserializeCorrectly() throws Exception {
+        for (long sequenceNumber = 1; sequenceNumber <= SEQUENCE_RANGE_MAX; sequenceNumber++) {
+            SegmentHeader headerForSequence = SegmentHeader.create(System.currentTimeMillis(), sequenceNumber);
+            byte[] serializedHeaderBytes = headerForSequence.toBytes();
+            SegmentHeader deserializedHeader = SegmentHeader.fromBytes(serializedHeaderBytes);
 
-            assertEquals(seq, deserialized.segmentSequence(), "Sequence " + seq + " should be preserved");
-            assertTrue(deserialized.isValid(), "Header with sequence " + seq + " should be valid");
+            assertEquals(sequenceNumber, deserializedHeader.segmentSequence());
+            assertTrue(deserializedHeader.isValid());
         }
     }
 
     @Test
-    void testTimestampPreservation() throws Exception {
-        long timestamp = 1234567890123L;
-        SegmentHeader header = SegmentHeader.create(timestamp, 1);
-        byte[] bytes = header.toBytes();
-        SegmentHeader deserialized = SegmentHeader.fromBytes(bytes);
+    void largeTimestampPreservedThroughSerializationRoundTrip() throws Exception {
+        SegmentHeader headerWithLargeTimestamp = SegmentHeader.create(LARGE_TIMESTAMP, 1);
+        byte[] serializedHeaderBytes = headerWithLargeTimestamp.toBytes();
+        SegmentHeader deserializedHeader = SegmentHeader.fromBytes(serializedHeaderBytes);
 
-        assertEquals(timestamp, deserialized.createdAt(), "Timestamp should be preserved exactly");
+        assertEquals(LARGE_TIMESTAMP, deserializedHeader.createdAt());
     }
 
     @Test
-    void testCorruptedTimestamp() throws Exception {
-        SegmentHeader header = SegmentHeader.create(1000000L, 1);
-        byte[] bytes = header.toBytes();
+    void corruptedTimestampFieldRendersHeaderInvalid() throws Exception {
+        SegmentHeader validHeader = SegmentHeader.create(REFERENCE_TIMESTAMP, 1);
+        byte[] serializedHeaderBytes = validHeader.toBytes();
 
-        // Corrupt timestamp field (bytes 2-9)
-        bytes[5] = (byte) ~bytes[5];
+        serializedHeaderBytes[5] = (byte) ~serializedHeaderBytes[5];
 
-        SegmentHeader corrupted = SegmentHeader.fromBytes(bytes);
-        assertFalse(corrupted.isValid(), "Header with corrupted timestamp should fail checksum");
+        SegmentHeader corruptedHeader = SegmentHeader.fromBytes(serializedHeaderBytes);
+        assertFalse(corruptedHeader.isValid());
     }
 
     @Test
-    void testCorruptedSequence() throws Exception {
-        SegmentHeader header = SegmentHeader.create(System.currentTimeMillis(), 42);
-        byte[] bytes = header.toBytes();
+    void corruptedSequenceFieldRendersHeaderInvalid() throws Exception {
+        SegmentHeader validHeader = SegmentHeader.create(System.currentTimeMillis(), 42);
+        byte[] serializedHeaderBytes = validHeader.toBytes();
 
-        // Corrupt sequence field (bytes 10-17)
-        bytes[15] = (byte) ~bytes[15];
+        serializedHeaderBytes[15] = (byte) ~serializedHeaderBytes[15];
 
-        SegmentHeader corrupted = SegmentHeader.fromBytes(bytes);
-        assertFalse(corrupted.isValid(), "Header with corrupted sequence should fail checksum");
+        SegmentHeader corruptedHeader = SegmentHeader.fromBytes(serializedHeaderBytes);
+        assertFalse(corruptedHeader.isValid());
     }
 
     @Test
-    void testZeroSequence() throws Exception {
-        SegmentHeader header = SegmentHeader.create(System.currentTimeMillis(), 0);
-        byte[] bytes = header.toBytes();
-        SegmentHeader deserialized = SegmentHeader.fromBytes(bytes);
+    void zeroSequenceNumberIsValidAndPreserved() throws Exception {
+        SegmentHeader headerWithZeroSequence = SegmentHeader.create(System.currentTimeMillis(), ZERO_SEQUENCE);
+        byte[] serializedHeaderBytes = headerWithZeroSequence.toBytes();
+        SegmentHeader deserializedHeader = SegmentHeader.fromBytes(serializedHeaderBytes);
 
-        assertEquals(0, deserialized.segmentSequence(), "Sequence 0 should be valid");
-        assertTrue(deserialized.isValid(), "Header with sequence 0 should be valid");
+        assertEquals(ZERO_SEQUENCE, deserializedHeader.segmentSequence());
+        assertTrue(deserializedHeader.isValid());
     }
 
     @Test
-    void testLargeSequence() throws Exception {
-        long largeSeq = Long.MAX_VALUE;
-        SegmentHeader header = SegmentHeader.create(System.currentTimeMillis(), largeSeq);
-        byte[] bytes = header.toBytes();
-        SegmentHeader deserialized = SegmentHeader.fromBytes(bytes);
+    void maximumSequenceNumberIsValidAndPreserved() throws Exception {
+        long maximumSequenceNumber = Long.MAX_VALUE;
+        SegmentHeader headerWithMaxSequence = SegmentHeader.create(System.currentTimeMillis(), maximumSequenceNumber);
+        byte[] serializedHeaderBytes = headerWithMaxSequence.toBytes();
+        SegmentHeader deserializedHeader = SegmentHeader.fromBytes(serializedHeaderBytes);
 
-        assertEquals(largeSeq, deserialized.segmentSequence(), "Large sequence should be preserved");
-        assertTrue(deserialized.isValid(), "Header with large sequence should be valid");
+        assertEquals(maximumSequenceNumber, deserializedHeader.segmentSequence());
+        assertTrue(deserializedHeader.isValid());
     }
 
     @Test
-    void testHeaderTooSmall() {
-        byte[] tooSmall = new byte[10];
-        assertThrows(IOException.class, () -> SegmentHeader.fromBytes(tooSmall),
-                "Should throw IOException for data smaller than header size");
+    void undersizedInputBufferThrowsIOException() {
+        byte[] undersizedBuffer = new byte[UNDERSIZED_BUFFER_SIZE];
+
+        assertThrows(IOException.class, () -> SegmentHeader.fromBytes(undersizedBuffer));
     }
 
     @Test
-    void testToString() throws Exception {
-        SegmentHeader header = SegmentHeader.create(1000000L, 5);
-        String str = header.toString();
+    void toStringContainsAllRelevantHeaderFields() throws Exception {
+        SegmentHeader header = SegmentHeader.create(REFERENCE_TIMESTAMP, REFERENCE_SEQUENCE);
+        String headerStringRepresentation = header.toString();
 
-        assertTrue(str.contains("magic"), "toString should contain magic");
-        assertTrue(str.contains("version"), "toString should contain version");
-        assertTrue(str.contains("createdAt"), "toString should contain createdAt");
-        assertTrue(str.contains("segmentSequence"), "toString should contain segmentSequence");
-        assertTrue(str.contains("valid"), "toString should contain validation status");
+        assertTrue(headerStringRepresentation.contains("magic"));
+        assertTrue(headerStringRepresentation.contains("version"));
+        assertTrue(headerStringRepresentation.contains("createdAt"));
+        assertTrue(headerStringRepresentation.contains("segmentSequence"));
+        assertTrue(headerStringRepresentation.contains("valid"));
     }
 
     @Test
-    void testMultipleHeadersWithDifferentSequences() throws Exception {
-        SegmentHeader h1 = SegmentHeader.create(1000L, 1);
-        SegmentHeader h2 = SegmentHeader.create(2000L, 2);
-        SegmentHeader h3 = SegmentHeader.create(3000L, 3);
+    void multipleDistinctHeadersSerializeIndependently() throws Exception {
+        SegmentHeader firstHeader = SegmentHeader.create(1000L, 1);
+        SegmentHeader secondHeader = SegmentHeader.create(2000L, 2);
+        SegmentHeader thirdHeader = SegmentHeader.create(3000L, 3);
 
-        byte[] b1 = h1.toBytes();
-        byte[] b2 = h2.toBytes();
-        byte[] b3 = h3.toBytes();
+        byte[] firstHeaderSerialized = firstHeader.toBytes();
+        byte[] secondHeaderSerialized = secondHeader.toBytes();
+        byte[] thirdHeaderSerialized = thirdHeader.toBytes();
 
-        SegmentHeader d1 = SegmentHeader.fromBytes(b1);
-        SegmentHeader d2 = SegmentHeader.fromBytes(b2);
-        SegmentHeader d3 = SegmentHeader.fromBytes(b3);
+        SegmentHeader firstHeaderDeserialized = SegmentHeader.fromBytes(firstHeaderSerialized);
+        SegmentHeader secondHeaderDeserialized = SegmentHeader.fromBytes(secondHeaderSerialized);
+        SegmentHeader thirdHeaderDeserialized = SegmentHeader.fromBytes(thirdHeaderSerialized);
 
-        assertEquals(1, d1.segmentSequence());
-        assertEquals(2, d2.segmentSequence());
-        assertEquals(3, d3.segmentSequence());
+        assertEquals(1, firstHeaderDeserialized.segmentSequence());
+        assertEquals(2, secondHeaderDeserialized.segmentSequence());
+        assertEquals(3, thirdHeaderDeserialized.segmentSequence());
 
-        assertTrue(d1.isValid() && d2.isValid() && d3.isValid(),
-                "All headers should be valid");
+        assertTrue(firstHeaderDeserialized.isValid() && secondHeaderDeserialized.isValid() && thirdHeaderDeserialized.isValid());
     }
 }

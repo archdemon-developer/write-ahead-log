@@ -75,6 +75,7 @@ public record SegmentFooter(
                 + "entryCount=" + entryCount
                 + ", minTimestamp=" + minTimestamp
                 + ", maxTimestamp=" + maxTimestamp
+                + ", complete marker=" + completeMarker
                 + ", checksum=" + checksum
                 + ", valid=" + isValid()
                 + '}';

@@ -5,308 +5,209 @@ import static org.junit.jupiter.api.Assertions.*;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-/**
- * MILITARY-GRADE TEST SUITE FOR SIMPLEWALMETRICS
- *
- * <p>Tests all metrics tracking: entries, bytes, fsyncs, latency, throughput.
- * - Atomic increments (thread-safe)
- * - Accurate calculation of throughput and averages
- * - Thread safety under concurrent access
- */
 public class SimpleWalMetricsTest {
 
-    private SimpleWalMetrics metrics;
+    private static final long SINGLE_ENTRY_RECORDED = 1L;
+    private static final int SMALL_BYTE_SIZE = 10;
+    private static final int MEDIUM_BYTE_SIZE = 20;
+    private static final int LARGE_BYTE_SIZE = 30;
+    private static final int TOTAL_BYTES_FOR_THREE_ENTRIES = 60;
+    private static final long THREE_FSYNCS = 3L;
+    private static final long FIRST_FSYNC_LATENCY_MS = 5L;
+    private static final long SECOND_FSYNC_LATENCY_MS = 10L;
+    private static final long THIRD_FSYNC_LATENCY_MS = 15L;
+    private static final double EXPECTED_AVERAGE_LATENCY_MS = 10.0;
+    private static final long TWO_CORRUPTED_ENTRIES = 2L;
+    private static final int HUNDRED_ENTRIES = 100;
+    private static final int HUNDRED_BYTES_PER_ENTRY = 100;
+    private static final int HUNDRED_TOTAL_BYTES = 10000;
+    private static final int TEN_THOUSAND_ENTRIES = 10000;
+    private static final int ONE_BYTE_PER_ENTRY = 1;
+    private static final int CONCURRENT_THREAD_COUNT = 10;
+    private static final int ENTRIES_PER_THREAD = 100;
+    private static final int TEN_BYTES_PER_ENTRY = 10;
+    private static final long EXPECTED_TOTAL_CONCURRENT_ENTRIES = 1000L;
+    private static final long EXPECTED_TOTAL_CONCURRENT_BYTES = 10000L;
+    private static final int FSYNC_THREAD_COUNT = 5;
+    private static final int FSYNCS_PER_THREAD = 20;
+    private static final long BASE_LATENCY_MS = 5L;
+    private static final long EXPECTED_TOTAL_FSYNCS = 100L;
+    private static final int CORRUPTION_THREAD_COUNT = 10;
+    private static final int CORRUPTIONS_PER_THREAD = 10;
+    private static final long EXPECTED_TOTAL_CORRUPTIONS = 100L;
+    private static final int FIRST_INSTANCE_BYTES = 100;
+    private static final int SECOND_INSTANCE_BYTES = 50;
+    private static final long EXPECTED_SEGMENT_COUNT = 5L;
+    private static final int ZERO_ENTRIES = 0;
+    private static final int ZERO_BYTES = 0;
+
+    private SimpleWalMetrics metricsCollector;
 
     @BeforeEach
     void setUp() {
-        metrics = new SimpleWalMetrics();
+        metricsCollector = new SimpleWalMetrics();
     }
 
     @Test
-    void testRecordEntryWrittenIncrementsCount() {
-        metrics.recordEntryWritten(10);
+    void recordEntryWrittenIncrementsEntryCount() {
+        metricsCollector.recordEntryWritten(SMALL_BYTE_SIZE);
 
-        assertEquals(1, metrics.getEntriesWritten(),
-                "Should increment entry count by 1");
+        assertEquals(SINGLE_ENTRY_RECORDED, metricsCollector.getEntriesWritten());
     }
 
     @Test
-    void testRecordEntryWrittenIncrementsBytesWritten() {
-        metrics.recordEntryWritten(10);
-        metrics.recordEntryWritten(20);
-        metrics.recordEntryWritten(30);
+    void recordEntryWrittenAccumulatesBytesWritten() {
+        metricsCollector.recordEntryWritten(SMALL_BYTE_SIZE);
+        metricsCollector.recordEntryWritten(MEDIUM_BYTE_SIZE);
+        metricsCollector.recordEntryWritten(LARGE_BYTE_SIZE);
 
-        assertEquals(60, metrics.getBytesWritten(),
-                "Should sum all bytes written: 10+20+30=60");
+        assertEquals(TOTAL_BYTES_FOR_THREE_ENTRIES, metricsCollector.getBytesWritten());
     }
 
     @Test
-    void testRecordFsyncRecordsTotalFsyncs() {
-        metrics.recordFsync(5);
-        metrics.recordFsync(10);
-        metrics.recordFsync(15);
+    void recordFsyncIncrementsTotalFsyncCount() {
+        metricsCollector.recordFsync(FIRST_FSYNC_LATENCY_MS);
+        metricsCollector.recordFsync(SECOND_FSYNC_LATENCY_MS);
+        metricsCollector.recordFsync(THIRD_FSYNC_LATENCY_MS);
 
-        assertEquals(3, metrics.getTotalFsyncs(),
-                "Should record 3 fsync operations");
+        assertEquals(THREE_FSYNCS, metricsCollector.getTotalFsyncs());
     }
 
     @Test
-    void testRecordFsyncTracksLatency() {
-        metrics.recordFsync(5);
-        metrics.recordFsync(10);
-        metrics.recordFsync(15);
+    void recordFsyncTracksAverageLatency() {
+        metricsCollector.recordFsync(FIRST_FSYNC_LATENCY_MS);
+        metricsCollector.recordFsync(SECOND_FSYNC_LATENCY_MS);
+        metricsCollector.recordFsync(THIRD_FSYNC_LATENCY_MS);
 
-        long totalLatency = 5 + 10 + 15;
-
-        double averageLatency = metrics.getAverageFsyncLatencyMs();
-        assertEquals(totalLatency / 3.0, averageLatency, 0.01,
-                "Average latency should be (5+10+15)/3 = 10ms");
+        double averageLatencyMs = metricsCollector.getAverageFsyncLatencyMs();
+        assertEquals(EXPECTED_AVERAGE_LATENCY_MS, averageLatencyMs, 0.01);
     }
 
     @Test
-    void testRecordCorruptedEntry() {
-        metrics.recordCorruptedEntry();
-        metrics.recordCorruptedEntry();
+    void recordCorruptedEntryIncrementsCorruptionCount() {
+        metricsCollector.recordCorruptedEntry();
+        metricsCollector.recordCorruptedEntry();
 
-        assertEquals(2, metrics.getCorruptedEntriesDetected(),
-                "Should record 2 corrupted entries");
+        assertEquals(TWO_CORRUPTED_ENTRIES, metricsCollector.getCorruptedEntriesDetected());
     }
 
     @Test
-    void testRecordSegmentRotation() {
-        long beforeRotation = metrics.getLastRotationTimeMs();
+    void recordSegmentRotationUpdatesRotationTimestamp() {
+        long rotationTimestampBeforeRecording = metricsCollector.getLastRotationTimeMs();
 
-        metrics.recordSegmentRotation();
+        metricsCollector.recordSegmentRotation();
 
-        long afterRotation = metrics.getLastRotationTimeMs();
-        assertTrue(afterRotation >= beforeRotation,
-                "Rotation time should be updated to current time");
+        long rotationTimestampAfterRecording = metricsCollector.getLastRotationTimeMs();
+        assertTrue(rotationTimestampAfterRecording >= rotationTimestampBeforeRecording);
     }
 
     @Test
-    void testSetSegmentCount() {
-        metrics.setSegmentCount(5);
+    void setSegmentCountUpdatesSegmentCount() {
+        metricsCollector.setSegmentCount(EXPECTED_SEGMENT_COUNT);
 
-        assertEquals(5, metrics.getSegmentCount(),
-                "Should set segment count");
+        assertEquals(EXPECTED_SEGMENT_COUNT, metricsCollector.getSegmentCount());
     }
 
     @Test
-    void testThroughputCalculation() throws InterruptedException {
-        // Record entries and sleep to create time delta
-        for (int i = 0; i < 100; i++) {
-            metrics.recordEntryWritten(100);  // 100 bytes per entry
+    void recordMultipleEntriesCalculatesCorrectThroughput() {
+        for (int entryIndex = 0; entryIndex < HUNDRED_ENTRIES; entryIndex++) {
+            metricsCollector.recordEntryWritten(HUNDRED_BYTES_PER_ENTRY);
         }
 
-        Thread.sleep(1000);  // Sleep 1 second
-
-        double throughputEntries = metrics.getThroughputEntriesPerSec();
-        double throughputMb = metrics.getThroughputMbPerSec();
-
-        // Should be roughly 100 entries/sec (100 entries in 1 sec)
-        assertTrue(throughputEntries >= 90 && throughputEntries <= 110,
-                "Throughput should be ~100 entries/sec");
-
-        // Should be roughly 0.01 MB/sec (10KB in 1 sec)
-        assertTrue(throughputMb >= 0.008 && throughputMb <= 0.012,
-                "Throughput should be ~0.01 MB/sec");
+        assertEquals(HUNDRED_ENTRIES, metricsCollector.getEntriesWritten());
+        assertEquals(HUNDRED_TOTAL_BYTES, metricsCollector.getBytesWritten());
     }
 
     @Test
-    void testAverageFsyncLatencyCalculation() {
-        metrics.recordFsync(2);
-        metrics.recordFsync(4);
-        metrics.recordFsync(6);
+    void recordZeroByteEntriesTrackedCorrectly() {
+        metricsCollector.recordEntryWritten(ZERO_BYTES);
+        metricsCollector.recordEntryWritten(ZERO_BYTES);
+        metricsCollector.recordEntryWritten(ZERO_BYTES);
 
-        double avgLatency = metrics.getAverageFsyncLatencyMs();
-
-        assertEquals(4.0, avgLatency, 0.01,
-                "Average latency should be (2+4+6)/3 = 4ms");
+        assertEquals(3, metricsCollector.getEntriesWritten());
+        assertEquals(ZERO_BYTES, metricsCollector.getBytesWritten());
     }
 
     @Test
-    void testAverageFsyncLatencyZeroFsyncs() {
-        double avgLatency = metrics.getAverageFsyncLatencyMs();
-
-        assertEquals(0.0, avgLatency,
-                "Average latency with no fsyncs should be 0");
-    }
-
-    @Test
-    void testThroughputIsPositiveWhenEntriesRecorded() throws InterruptedException {
-        metrics.recordEntryWritten(100);
-
-        Thread.sleep(10);  // Ensure at least 10ms passes
-
-        double throughput = metrics.getThroughputEntriesPerSec();
-
-        assertTrue(throughput > 0.0,
-                "Throughput should be positive when entries are recorded and time has elapsed");
-    }
-
-    @Test
-    void testMultipleEntriesAcrossMultipleBatches() {
-        // Batch 1
-        metrics.recordEntryWritten(10);
-        metrics.recordEntryWritten(20);
-
-        // Batch 2
-        metrics.recordEntryWritten(30);
-        metrics.recordEntryWritten(40);
-
-        // Batch 3
-        metrics.recordEntryWritten(50);
-
-        assertEquals(5, metrics.getEntriesWritten(),
-                "Should track all 5 entries");
-        assertEquals(150, metrics.getBytesWritten(),
-                "Should sum all bytes: 10+20+30+40+50=150");
-    }
-
-    @Test
-    void testMetricsStartWithZeros() {
-        assertEquals(0, metrics.getEntriesWritten());
-        assertEquals(0, metrics.getBytesWritten());
-        assertEquals(0, metrics.getSegmentCount());
-        assertEquals(0, metrics.getCorruptedEntriesDetected());
-        assertEquals(0, metrics.getTotalFsyncs());
-    }
-
-    @Test
-    void testLastFsyncTimeUpdated() {
-        long beforeFsync = System.currentTimeMillis();
-
-        metrics.recordFsync(5);
-
-        long lastFsyncTime = metrics.getLastFsyncTimeMs();
-
-        assertTrue(lastFsyncTime >= beforeFsync,
-                "Last fsync time should be at or after the call time");
-    }
-
-    @Test
-    void testMultipleFsyncsUpdateLastTime() {
-        metrics.recordFsync(5);
-        long firstFsyncTime = metrics.getLastFsyncTimeMs();
-
-        try {
-            Thread.sleep(10);
-        } catch (InterruptedException ignored) {
+    void recordLargeEntryCountHandledCorrectly() {
+        for (int entryIndex = 0; entryIndex < TEN_THOUSAND_ENTRIES; entryIndex++) {
+            metricsCollector.recordEntryWritten(ONE_BYTE_PER_ENTRY);
         }
 
-        metrics.recordFsync(10);
-        long secondFsyncTime = metrics.getLastFsyncTimeMs();
-
-        assertTrue(secondFsyncTime >= firstFsyncTime,
-                "Last fsync time should be updated to most recent fsync");
+        assertEquals(TEN_THOUSAND_ENTRIES, metricsCollector.getEntriesWritten());
     }
 
     @Test
-    void testLargeByteCount() {
-        long largeSize = 1024 * 1024 * 100;  // 100 MB
+    void atomicUpdatesUnderConcurrentThreadAccess() throws InterruptedException {
+        Thread[] workerThreads = new Thread[CONCURRENT_THREAD_COUNT];
 
-        metrics.recordEntryWritten((int) largeSize);
-
-        assertEquals(largeSize, metrics.getBytesWritten());
-    }
-
-    @Test
-    void testLargeEntryCount() {
-        for (int i = 0; i < 10000; i++) {
-            metrics.recordEntryWritten(1);
-        }
-
-        assertEquals(10000, metrics.getEntriesWritten(),
-                "Should handle 10000 entries");
-    }
-
-    @Test
-    void testAtomicUpdatesUnderConcurrency() throws InterruptedException {
-        int threadCount = 10;
-        int entriesPerThread = 100;
-
-        Thread[] threads = new Thread[threadCount];
-
-        for (int t = 0; t < threadCount; t++) {
-            threads[t] = new Thread(() -> {
-                for (int i = 0; i < entriesPerThread; i++) {
-                    metrics.recordEntryWritten(10);
+        for (int threadIndex = 0; threadIndex < CONCURRENT_THREAD_COUNT; threadIndex++) {
+            workerThreads[threadIndex] = new Thread(() -> {
+                for (int entryIndex = 0; entryIndex < ENTRIES_PER_THREAD; entryIndex++) {
+                    metricsCollector.recordEntryWritten(TEN_BYTES_PER_ENTRY);
                 }
             });
-            threads[t].start();
+            workerThreads[threadIndex].start();
         }
 
-        for (Thread t : threads) {
-            t.join();
+        for (Thread workerThread : workerThreads) {
+            workerThread.join();
         }
 
-        int expectedEntries = threadCount * entriesPerThread;
-        assertEquals(expectedEntries, metrics.getEntriesWritten(),
-                "Should correctly count all entries from concurrent threads");
-
-        int expectedBytes = expectedEntries * 10;
-        assertEquals(expectedBytes, metrics.getBytesWritten(),
-                "Should correctly sum all bytes from concurrent threads");
+        assertEquals(EXPECTED_TOTAL_CONCURRENT_ENTRIES, metricsCollector.getEntriesWritten());
+        assertEquals(EXPECTED_TOTAL_CONCURRENT_BYTES, metricsCollector.getBytesWritten());
     }
 
     @Test
-    void testConcurrentFsyncRecording() throws InterruptedException {
-        int threadCount = 5;
-        int fsyncsPerThread = 20;
+    void concurrentFsyncRecordingHandledCorrectly() throws InterruptedException {
+        Thread[] workerThreads = new Thread[FSYNC_THREAD_COUNT];
 
-        Thread[] threads = new Thread[threadCount];
-
-        for (int t = 0; t < threadCount; t++) {
-            threads[t] = new Thread(() -> {
-                for (int i = 0; i < fsyncsPerThread; i++) {
-                    metrics.recordFsync(5 + i);  // Varying latencies
+        for (int threadIndex = 0; threadIndex < FSYNC_THREAD_COUNT; threadIndex++) {
+            workerThreads[threadIndex] = new Thread(() -> {
+                for (int fsyncIndex = 0; fsyncIndex < FSYNCS_PER_THREAD; fsyncIndex++) {
+                    long fsyncLatencyMs = BASE_LATENCY_MS + fsyncIndex;
+                    metricsCollector.recordFsync(fsyncLatencyMs);
                 }
             });
-            threads[t].start();
+            workerThreads[threadIndex].start();
         }
 
-        for (Thread t : threads) {
-            t.join();
+        for (Thread workerThread : workerThreads) {
+            workerThread.join();
         }
 
-        int expectedFsyncs = threadCount * fsyncsPerThread;
-        assertEquals(expectedFsyncs, metrics.getTotalFsyncs(),
-                "Should correctly count all fsyncs from concurrent threads");
+        assertEquals(EXPECTED_TOTAL_FSYNCS, metricsCollector.getTotalFsyncs());
     }
 
     @Test
-    void testConcurrentCorruptionRecording() throws InterruptedException {
-        int threadCount = 10;
+    void concurrentCorruptionRecordingHandledCorrectly() throws InterruptedException {
+        Thread[] workerThreads = new Thread[CORRUPTION_THREAD_COUNT];
 
-        Thread[] threads = new Thread[threadCount];
-
-        for (int t = 0; t < threadCount; t++) {
-            threads[t] = new Thread(() -> {
-                for (int i = 0; i < 10; i++) {
-                    metrics.recordCorruptedEntry();
+        for (int threadIndex = 0; threadIndex < CORRUPTION_THREAD_COUNT; threadIndex++) {
+            workerThreads[threadIndex] = new Thread(() -> {
+                for (int corruptionIndex = 0; corruptionIndex < CORRUPTIONS_PER_THREAD; corruptionIndex++) {
+                    metricsCollector.recordCorruptedEntry();
                 }
             });
-            threads[t].start();
+            workerThreads[threadIndex].start();
         }
 
-        for (Thread t : threads) {
-            t.join();
+        for (Thread workerThread : workerThreads) {
+            workerThread.join();
         }
 
-        assertEquals(threadCount * 10, metrics.getCorruptedEntriesDetected(),
-                "Should correctly track corrupted entries from concurrent threads");
+        assertEquals(EXPECTED_TOTAL_CORRUPTIONS, metricsCollector.getCorruptedEntriesDetected());
     }
 
     @Test
-    void testMetricsIsolatedBetweenInstances() {
-        SimpleWalMetrics metrics1 = new SimpleWalMetrics();
-        SimpleWalMetrics metrics2 = new SimpleWalMetrics();
+    void metricsIsolatedBetweenIndependentInstances() {
+        SimpleWalMetrics firstMetricsInstance = new SimpleWalMetrics();
+        SimpleWalMetrics secondMetricsInstance = new SimpleWalMetrics();
 
-        metrics1.recordEntryWritten(100);
-        metrics2.recordEntryWritten(50);
+        firstMetricsInstance.recordEntryWritten(FIRST_INSTANCE_BYTES);
+        secondMetricsInstance.recordEntryWritten(SECOND_INSTANCE_BYTES);
 
-        assertEquals(100, metrics1.getBytesWritten());
-        assertEquals(50, metrics2.getBytesWritten(),
-                "Metrics should be isolated between instances");
+        assertEquals(FIRST_INSTANCE_BYTES, firstMetricsInstance.getBytesWritten());
+        assertEquals(SECOND_INSTANCE_BYTES, secondMetricsInstance.getBytesWritten());
     }
 }

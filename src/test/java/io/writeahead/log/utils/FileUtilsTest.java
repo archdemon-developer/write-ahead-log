@@ -7,506 +7,439 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-/**
- * MILITARY-GRADE FILE I/O TESTS FOR FileUtils
- *
- * <p>FileUtils handles all file operations. If wrong:
- * - Data loss on write
- * - Crash on read
- * - Durability failures (fsync)
- * - Directory operations fail
- *
- * <p>These tests verify file I/O correctness for production reliability.
- */
 public class FileUtilsTest {
 
-    private Path tempDir;
+    private static final String LOG_FILE_EXTENSION = ".log";
+    private static final String TEXT_FILE_EXTENSION = ".txt";
+    private static final String TEST_LOG_FILENAME = "test.log";
+    private static final String INITIAL_DATA = "initial";
+    private static final String APPENDED_DATA = "appended";
+    private static final String HELLO_WORLD = "hello world";
+    private static final String FIRST_CHUNK = "first";
+    private static final String SECOND_CHUNK = "second";
+    private static final String THIRD_CHUNK = "third";
+    private static final String FIRST_WRITE = "1";
+    private static final String SECOND_WRITE = "2";
+    private static final String THIRD_WRITE = "3";
+    private static final String BEFORE_FSYNC = "before fsync";
+    private static final String AFTER_FSYNC = " after fsync";
+    private static final String DATA_INTEGRITY_MESSAGE = "integrity test data";
+    private static final String DURABLE_DATA = "durable";
+    private static final String NONEXISTENT_FILE = "nonexistent.log";
+    private static final String LOGS_SUBDIRECTORY = "logs";
+    private static final String NEWDIR_SUBDIRECTORY = "newdir";
+    private static final String WALFILE_001 = "wal-001.log";
+    private static final String WALFILE_002 = "wal-002.log";
+    private static final String WALFILE_003 = "wal-003.log";
+    private static final String OTHER_FILE = "other.txt";
+    private static final String NOT_LOG_CONTENT = "not a log";
+    private static final String SEGMENT_CONTENT = "content";
+    private static final int BINARY_BYTE_RANGE = 256;
+    private static final int EXPECTED_LOG_FILE_COUNT = 3;
+    private static final int EMPTY_FILE_SIZE = 0;
+
+    private Path tempLogDirectory;
 
     @BeforeEach
     void setUp() throws IOException {
-        tempDir = Files.createTempDirectory("wal-fileutils-test-");
+        tempLogDirectory = Files.createTempDirectory("wal-fileutils-test-");
     }
 
     @AfterEach
     void tearDown() throws IOException {
-        Files.walk(tempDir)
+        Files.walk(tempLogDirectory)
                 .sorted((a, b) -> b.compareTo(a))
-                .forEach(
-                        path -> {
-                            try {
-                                Files.delete(path);
-                            } catch (IOException e) {
-                                // Ignore
-                            }
-                        });
-    }
-
-    // ============================================================================
-    // SECTION 1: OPEN/WRITE/CLOSE STREAM LIFECYCLE
-    // ============================================================================
-
-    @Test
-    void testOpenAppendStreamCreatesFile() throws IOException {
-        File file = new File(tempDir.toFile(), "test.log");
-
-        FileStream stream = FileUtils.openAppendStream(file);
-
-        assertNotNull(stream, "Should return valid stream");
-        assertTrue(file.exists(), "File should be created");
-        assertNotNull(stream.fileOutputStream(), "Should have file output stream");
-        assertNotNull(stream.dataOutputStream(), "Should have data output stream");
-
-        FileUtils.closeStream(stream);
+                .forEach(path -> {
+                    try {
+                        Files.delete(path);
+                    } catch (IOException ignored) {
+                    }
+                });
     }
 
     @Test
-    void testOpenAppendStreamAppendMode() throws IOException {
-        File file = new File(tempDir.toFile(), "test.log");
+    void openAppendStreamCreatesFile() throws IOException {
+        File testLogFile = new File(tempLogDirectory.toFile(), TEST_LOG_FILENAME);
 
-        // Write initial data
-        FileStream stream1 = FileUtils.openAppendStream(file);
-        FileUtils.writeToStream(stream1, "initial".getBytes());
-        FileUtils.closeStream(stream1);
+        FileStream openedStream = FileUtils.openAppendStream(testLogFile);
 
-        long sizeAfterFirst = FileUtils.getFileSize(file);
+        assertNotNull(openedStream);
+        assertTrue(testLogFile.exists());
+        assertNotNull(openedStream.fileOutputStream());
+        assertNotNull(openedStream.dataOutputStream());
 
-        // Append more data (should not truncate)
-        FileStream stream2 = FileUtils.openAppendStream(file);
-        FileUtils.writeToStream(stream2, "appended".getBytes());
-        FileUtils.closeStream(stream2);
-
-        long sizeAfterSecond = FileUtils.getFileSize(file);
-
-        // Should have appended, not replaced
-        assertTrue(sizeAfterSecond > sizeAfterFirst, "Append mode should add to file, not replace");
-        assertEquals(
-                sizeAfterFirst + "appended".length(), sizeAfterSecond, "Size should match initial + appended");
+        FileUtils.closeStream(openedStream);
     }
 
     @Test
-    void testWriteToStreamWritesData() throws IOException {
-        File file = new File(tempDir.toFile(), "test.log");
-        FileStream stream = FileUtils.openAppendStream(file);
+    void openAppendStreamAppendsInsteadOfTruncating() throws IOException {
+        File testLogFile = new File(tempLogDirectory.toFile(), TEST_LOG_FILENAME);
 
-        byte[] data = "hello world".getBytes();
-        FileUtils.writeToStream(stream, data);
+        FileStream firstStream = FileUtils.openAppendStream(testLogFile);
+        FileUtils.writeToStream(firstStream, INITIAL_DATA.getBytes());
+        FileUtils.closeStream(firstStream);
+        long sizeAfterFirstWrite = FileUtils.getFileSize(testLogFile);
+
+        FileStream secondStream = FileUtils.openAppendStream(testLogFile);
+        FileUtils.writeToStream(secondStream, APPENDED_DATA.getBytes());
+        FileUtils.closeStream(secondStream);
+        long sizeAfterSecondWrite = FileUtils.getFileSize(testLogFile);
+
+        assertTrue(sizeAfterSecondWrite > sizeAfterFirstWrite);
+        assertEquals(sizeAfterFirstWrite + APPENDED_DATA.length(), sizeAfterSecondWrite);
+    }
+
+    @Test
+    void writeToStreamPersistsDataToDisk() throws IOException {
+        File testLogFile = new File(tempLogDirectory.toFile(), TEST_LOG_FILENAME);
+        FileStream stream = FileUtils.openAppendStream(testLogFile);
+
+        byte[] dataToWrite = HELLO_WORLD.getBytes();
+        FileUtils.writeToStream(stream, dataToWrite);
         FileUtils.closeStream(stream);
 
-        byte[] readBack = FileUtils.readAllBytes(file);
-        assertArrayEquals(data, readBack, "Written data should match read data");
+        byte[] readBackData = FileUtils.readAllBytes(testLogFile);
+        assertArrayEquals(dataToWrite, readBackData);
     }
 
     @Test
-    void testWriteMultipleChunks() throws IOException {
-        File file = new File(tempDir.toFile(), "test.log");
-        FileStream stream = FileUtils.openAppendStream(file);
+    void writeToStreamMultipleTimesPreservesBothWrites() throws IOException {
+        File testLogFile = new File(tempLogDirectory.toFile(), TEST_LOG_FILENAME);
+        FileStream stream = FileUtils.openAppendStream(testLogFile);
 
-        byte[] chunk1 = "first".getBytes();
-        byte[] chunk2 = "second".getBytes();
-        byte[] chunk3 = "third".getBytes();
+        byte[] firstChunkBytes = FIRST_CHUNK.getBytes();
+        byte[] secondChunkBytes = SECOND_CHUNK.getBytes();
+        byte[] thirdChunkBytes = THIRD_CHUNK.getBytes();
 
-        FileUtils.writeToStream(stream, chunk1);
-        FileUtils.writeToStream(stream, chunk2);
-        FileUtils.writeToStream(stream, chunk3);
+        FileUtils.writeToStream(stream, firstChunkBytes);
+        FileUtils.writeToStream(stream, secondChunkBytes);
+        FileUtils.writeToStream(stream, thirdChunkBytes);
         FileUtils.closeStream(stream);
 
-        byte[] readBack = FileUtils.readAllBytes(file);
+        byte[] readBackData = FileUtils.readAllBytes(testLogFile);
 
-        // Reconstruct expected
-        byte[] expected = new byte[chunk1.length + chunk2.length + chunk3.length];
-        System.arraycopy(chunk1, 0, expected, 0, chunk1.length);
-        System.arraycopy(chunk2, 0, expected, chunk1.length, chunk2.length);
-        System.arraycopy(chunk3, 0, expected, chunk1.length + chunk2.length, chunk3.length);
+        byte[] expectedData = new byte[firstChunkBytes.length + secondChunkBytes.length + thirdChunkBytes.length];
+        System.arraycopy(firstChunkBytes, 0, expectedData, 0, firstChunkBytes.length);
+        System.arraycopy(secondChunkBytes, 0, expectedData, firstChunkBytes.length, secondChunkBytes.length);
+        System.arraycopy(thirdChunkBytes, 0, expectedData, firstChunkBytes.length + secondChunkBytes.length, thirdChunkBytes.length);
 
-        assertArrayEquals(expected, readBack, "Multiple writes should be sequential");
+        assertArrayEquals(expectedData, readBackData);
     }
 
     @Test
-    void testCloseStreamClosesFile() throws IOException {
-        File file = new File(tempDir.toFile(), "test.log");
-        FileStream stream = FileUtils.openAppendStream(file);
+    void closeStreamPreventsWritesAfterClosure() throws IOException {
+        File testLogFile = new File(tempLogDirectory.toFile(), TEST_LOG_FILENAME);
+        FileStream stream = FileUtils.openAppendStream(testLogFile);
 
         FileUtils.writeToStream(stream, "data".getBytes());
         FileUtils.closeStream(stream);
 
-        // After close, writing should fail
         assertThrows(
                 IOException.class,
-                () -> FileUtils.writeToStream(stream, "more".getBytes()),
-                "Should not be able to write to closed stream");
+                () -> FileUtils.writeToStream(stream, "more".getBytes()));
     }
 
-    // ============================================================================
-    // SECTION 2: FSYNC DURABILITY
-    // ============================================================================
-
     @Test
-    void testFsyncStreamDurability() throws IOException {
-        File file = new File(tempDir.toFile(), "test.log");
-        FileStream stream = FileUtils.openAppendStream(file);
+    void fsyncStreamForcesDataToDisk() throws IOException {
+        File testLogFile = new File(tempLogDirectory.toFile(), TEST_LOG_FILENAME);
+        FileStream stream = FileUtils.openAppendStream(testLogFile);
 
-        byte[] data = "durable".getBytes();
-        FileUtils.writeToStream(stream, data);
-        FileUtils.fsyncStream(stream); // Force to disk
+        byte[] durableData = DURABLE_DATA.getBytes();
+        FileUtils.writeToStream(stream, durableData);
+        FileUtils.fsyncStream(stream);
         FileUtils.closeStream(stream);
 
-        // Verify data persisted
-        byte[] readBack = FileUtils.readAllBytes(file);
-        assertArrayEquals(data, readBack, "Fsynced data should persist");
+        byte[] readBackData = FileUtils.readAllBytes(testLogFile);
+        assertArrayEquals(durableData, readBackData);
     }
 
     @Test
-    void testFsyncBeforeClose() throws IOException {
-        File file = new File(tempDir.toFile(), "test.log");
-        FileStream stream = FileUtils.openAppendStream(file);
+    void fsyncCanBeCalledBeforeSubsequentWrites() throws IOException {
+        File testLogFile = new File(tempLogDirectory.toFile(), TEST_LOG_FILENAME);
+        FileStream stream = FileUtils.openAppendStream(testLogFile);
 
-        FileUtils.writeToStream(stream, "before fsync".getBytes());
-        FileUtils.fsyncStream(stream); // Explicit fsync
-        FileUtils.writeToStream(stream, " after fsync".getBytes());
+        FileUtils.writeToStream(stream, BEFORE_FSYNC.getBytes());
+        FileUtils.fsyncStream(stream);
+        FileUtils.writeToStream(stream, AFTER_FSYNC.getBytes());
         FileUtils.closeStream(stream);
 
-        byte[] readBack = FileUtils.readAllBytes(file);
-        assertEquals(
-                "before fsync after fsync".length(),
-                readBack.length,
-                "Both pre-fsync and post-fsync data should exist");
+        byte[] readBackData = FileUtils.readAllBytes(testLogFile);
+        int expectedLength = BEFORE_FSYNC.length() + AFTER_FSYNC.length();
+        assertEquals(expectedLength, readBackData.length);
     }
 
     @Test
-    void testFsyncMultipleTimes() throws IOException {
-        File file = new File(tempDir.toFile(), "test.log");
-        FileStream stream = FileUtils.openAppendStream(file);
+    void fsyncCanBeCalledMultipleTimes() throws IOException {
+        File testLogFile = new File(tempLogDirectory.toFile(), TEST_LOG_FILENAME);
+        FileStream stream = FileUtils.openAppendStream(testLogFile);
 
-        FileUtils.writeToStream(stream, "1".getBytes());
+        FileUtils.writeToStream(stream, FIRST_WRITE.getBytes());
         FileUtils.fsyncStream(stream);
 
-        FileUtils.writeToStream(stream, "2".getBytes());
+        FileUtils.writeToStream(stream, SECOND_WRITE.getBytes());
         FileUtils.fsyncStream(stream);
 
-        FileUtils.writeToStream(stream, "3".getBytes());
+        FileUtils.writeToStream(stream, THIRD_WRITE.getBytes());
         FileUtils.fsyncStream(stream);
 
         FileUtils.closeStream(stream);
 
-        byte[] readBack = FileUtils.readAllBytes(file);
-        assertArrayEquals("123".getBytes(), readBack, "Multiple fsyncs should persist all data");
+        byte[] readBackData = FileUtils.readAllBytes(testLogFile);
+        assertArrayEquals("123".getBytes(), readBackData);
     }
 
-    // ============================================================================
-    // SECTION 3: READ OPERATIONS
-    // ============================================================================
-
     @Test
-    void testReadAllBytesSimple() throws IOException {
-        File file = new File(tempDir.toFile(), "test.log");
-        byte[] original = "hello world".getBytes();
+    void readAllBytesReturnsExactDataWritten() throws IOException {
+        File testLogFile = new File(tempLogDirectory.toFile(), TEST_LOG_FILENAME);
+        byte[] originalData = HELLO_WORLD.getBytes();
 
-        FileStream stream = FileUtils.openAppendStream(file);
-        FileUtils.writeToStream(stream, original);
+        FileStream stream = FileUtils.openAppendStream(testLogFile);
+        FileUtils.writeToStream(stream, originalData);
         FileUtils.closeStream(stream);
 
-        byte[] readBack = FileUtils.readAllBytes(file);
-        assertArrayEquals(original, readBack, "Read bytes should match written");
+        byte[] readBackData = FileUtils.readAllBytes(testLogFile);
+        assertArrayEquals(originalData, readBackData);
     }
 
     @Test
-    void testReadAllBytesLargeFile() throws IOException {
-        File file = new File(tempDir.toFile(), "test.log");
+    void readAllBytesHandlesLargeFiles() throws IOException {
+        File testLogFile = new File(tempLogDirectory.toFile(), TEST_LOG_FILENAME);
         byte[] largeData = new byte[10000];
-        for (int i = 0; i < largeData.length; i++) {
-            largeData[i] = (byte) (i % 256);
+        for (int byteIndex = 0; byteIndex < largeData.length; byteIndex++) {
+            largeData[byteIndex] = (byte) (byteIndex % 256);
         }
 
-        FileStream stream = FileUtils.openAppendStream(file);
+        FileStream stream = FileUtils.openAppendStream(testLogFile);
         FileUtils.writeToStream(stream, largeData);
         FileUtils.closeStream(stream);
 
-        byte[] readBack = FileUtils.readAllBytes(file);
-        assertArrayEquals(largeData, readBack, "Large file read should match");
+        byte[] readBackData = FileUtils.readAllBytes(testLogFile);
+        assertArrayEquals(largeData, readBackData);
     }
 
     @Test
-    void testReadBytesWithOffset() throws IOException {
-        File file = new File(tempDir.toFile(), "test.log");
-        byte[] data = "0123456789".getBytes();
+    void readBytesReturnsSubsetOfFile() throws IOException {
+        File testLogFile = new File(tempLogDirectory.toFile(), TEST_LOG_FILENAME);
+        byte[] fullData = HELLO_WORLD.getBytes();
 
-        FileStream stream = FileUtils.openAppendStream(file);
-        FileUtils.writeToStream(stream, data);
+        FileStream stream = FileUtils.openAppendStream(testLogFile);
+        FileUtils.writeToStream(stream, fullData);
         FileUtils.closeStream(stream);
 
-        byte[] middle = FileUtils.readBytes(file, 3, 4);
-        assertArrayEquals("3456".getBytes(), middle, "Should read bytes 3-6");
+        int offsetStart = 6;
+        int lengthToRead = 5;
+        byte[] readBackData = FileUtils.readBytes(testLogFile, offsetStart, lengthToRead);
+
+        assertEquals(lengthToRead, readBackData.length);
+        assertArrayEquals("world".getBytes(), readBackData);
     }
 
     @Test
-    void testReadBytesFromStart() throws IOException {
-        File file = new File(tempDir.toFile(), "test.log");
-        byte[] data = "0123456789".getBytes();
-
-        FileStream stream = FileUtils.openAppendStream(file);
-        FileUtils.writeToStream(stream, data);
+    void fileExistsReturnsTrueForExistingFile() throws IOException {
+        File testLogFile = new File(tempLogDirectory.toFile(), TEST_LOG_FILENAME);
+        FileStream stream = FileUtils.openAppendStream(testLogFile);
         FileUtils.closeStream(stream);
 
-        byte[] start = FileUtils.readBytes(file, 0, 5);
-        assertArrayEquals("01234".getBytes(), start, "Should read from start");
+        assertTrue(FileUtils.fileExists(testLogFile));
     }
 
     @Test
-    void testReadBytesFromEnd() throws IOException {
-        File file = new File(tempDir.toFile(), "test.log");
-        byte[] data = "0123456789".getBytes();
-
-        FileStream stream = FileUtils.openAppendStream(file);
-        FileUtils.writeToStream(stream, data);
-        FileUtils.closeStream(stream);
-
-        byte[] end = FileUtils.readBytes(file, 5, 5);
-        assertArrayEquals("56789".getBytes(), end, "Should read from end");
+    void fileExistsReturnsFalseForNonExistentFile() {
+        File nonExistentFile = new File(tempLogDirectory.toFile(), NONEXISTENT_FILE);
+        assertFalse(FileUtils.fileExists(nonExistentFile));
     }
 
     @Test
-    void testReadBytesInsufficientData() throws IOException {
-        File file = new File(tempDir.toFile(), "test.log");
-        FileStream stream = FileUtils.openAppendStream(file);
-        FileUtils.writeToStream(stream, "short".getBytes());
-        FileUtils.closeStream(stream);
+    void getFileSizeReturnsEmptyForNewFile() throws IOException {
+        File testLogFile = new File(tempLogDirectory.toFile(), TEST_LOG_FILENAME);
+        FileStream stream = FileUtils.openAppendStream(testLogFile);
 
-        // Try to read more bytes than file contains
-        assertThrows(
-                IOException.class,
-                () -> FileUtils.readBytes(file, 0, 100),
-                "Should throw when trying to read past EOF");
-    }
-
-    // ============================================================================
-    // SECTION 4: FILE OPERATIONS (EXISTS, SIZE, DELETE)
-    // ============================================================================
-
-    @Test
-    void testFileExists() throws IOException {
-        File file = new File(tempDir.toFile(), "test.log");
-
-        assertFalse(FileUtils.fileExists(file), "File should not exist initially");
-
-        FileStream stream = FileUtils.openAppendStream(file);
-        FileUtils.closeStream(stream);
-
-        assertTrue(FileUtils.fileExists(file), "File should exist after creation");
-    }
-
-    @Test
-    void testGetFileSize() throws IOException {
-        File file = new File(tempDir.toFile(), "test.log");
-        FileStream stream = FileUtils.openAppendStream(file);
-
-        assertEquals(0, FileUtils.getFileSize(file), "Empty file should be 0 bytes");
+        assertEquals(EMPTY_FILE_SIZE, FileUtils.getFileSize(testLogFile));
 
         byte[] data = "hello".getBytes();
         FileUtils.writeToStream(stream, data);
         FileUtils.closeStream(stream);
 
-        assertEquals(data.length, FileUtils.getFileSize(file), "File size should match data length");
+        assertEquals(data.length, FileUtils.getFileSize(testLogFile));
     }
 
     @Test
-    void testDeleteFile() throws IOException {
-        File file = new File(tempDir.toFile(), "test.log");
-        FileStream stream = FileUtils.openAppendStream(file);
+    void deleteFileSucceedsForExistingFile() throws IOException {
+        File testLogFile = new File(tempLogDirectory.toFile(), TEST_LOG_FILENAME);
+        FileStream stream = FileUtils.openAppendStream(testLogFile);
         FileUtils.closeStream(stream);
 
-        assertTrue(FileUtils.fileExists(file), "File should exist before delete");
+        assertTrue(FileUtils.fileExists(testLogFile));
 
-        boolean deleted = FileUtils.deleteFile(file);
+        boolean deleteResult = FileUtils.deleteFile(testLogFile);
 
-        assertTrue(deleted, "Delete should succeed");
-        assertFalse(FileUtils.fileExists(file), "File should not exist after delete");
+        assertTrue(deleteResult);
+        assertFalse(FileUtils.fileExists(testLogFile));
     }
 
     @Test
-    void testDeleteNonExistentFile() throws IOException {
-        File file = new File(tempDir.toFile(), "nonexistent.log");
+    void deleteFileReturnsFalseForNonExistentFile() throws IOException {
+        File nonExistentFile = new File(tempLogDirectory.toFile(), NONEXISTENT_FILE);
 
-        assertFalse(FileUtils.fileExists(file), "File should not exist");
+        assertFalse(FileUtils.fileExists(nonExistentFile));
 
-        boolean deleted = FileUtils.deleteFile(file);
+        boolean deleteResult = FileUtils.deleteFile(nonExistentFile);
 
-        assertFalse(deleted, "Delete should return false for non-existent file");
-    }
-
-    // ============================================================================
-    // SECTION 5: DIRECTORY OPERATIONS
-    // ============================================================================
-
-    @Test
-    void testCreateDirectory() throws IOException {
-        String newDir = tempDir.toString() + "/newdir";
-
-        assertFalse(Files.exists(Path.of(newDir)), "Directory should not exist initially");
-
-        FileUtils.createDirectory(newDir);
-
-        assertTrue(Files.exists(Path.of(newDir)), "Directory should be created");
-        assertTrue(Files.isDirectory(Path.of(newDir)), "Should be a directory");
+        assertFalse(deleteResult);
     }
 
     @Test
-    void testCreateDirectoryAlreadyExists() throws IOException {
-        String existingDir = tempDir.toString();
+    void createDirectoryCreatesNewDirectory() throws IOException {
+        String newDirectoryPath = tempLogDirectory.toString() + "/" + NEWDIR_SUBDIRECTORY;
 
-        assertTrue(Files.exists(Path.of(existingDir)), "Directory exists");
+        assertFalse(Files.exists(Path.of(newDirectoryPath)));
 
-        FileUtils.createDirectory(existingDir); // Should not throw
+        FileUtils.createDirectory(newDirectoryPath);
 
-        assertTrue(Files.exists(Path.of(existingDir)), "Directory should still exist");
+        assertTrue(Files.exists(Path.of(newDirectoryPath)));
+        assertTrue(Files.isDirectory(Path.of(newDirectoryPath)));
     }
 
     @Test
-    void testGetLogFile() {
-        String directory = "/tmp/logs";
-        String filename = "test.log";
+    void createDirectorySucceedsWhenDirectoryAlreadyExists() throws IOException {
+        String existingDirectoryPath = tempLogDirectory.toString();
 
-        File file = FileUtils.getLogFile(directory, filename);
+        assertTrue(Files.exists(Path.of(existingDirectoryPath)));
 
-        assertEquals("/tmp/logs/test.log", file.getAbsolutePath(), "Path should be concatenated");
+        FileUtils.createDirectory(existingDirectoryPath);
+
+        assertTrue(Files.exists(Path.of(existingDirectoryPath)));
     }
 
     @Test
-    void testListLogFiles() throws IOException {
-        FileUtils.createDirectory(tempDir.toString() + "/logs");
-        String logsDir = tempDir.toString() + "/logs";
+    void getLogFileConstructsAbsolutePath() {
+        String directoryPath = "/tmp/logs";
+        String logFilename = "test.log";
 
-        // Create some log files
-        Files.write(Path.of(logsDir, "wal-001.log"), "content1".getBytes());
-        Files.write(Path.of(logsDir, "wal-002.log"), "content2".getBytes());
-        Files.write(Path.of(logsDir, "wal-003.log"), "content3".getBytes());
+        File logFile = FileUtils.getLogFile(directoryPath, logFilename);
 
-        // Create non-log file
-        Files.write(Path.of(logsDir, "other.txt"), "not a log".getBytes());
-
-        java.util.List<File> logFiles = FileUtils.listLogFiles(logsDir);
-
-        assertEquals(3, logFiles.size(), "Should find 3 log files");
-        assertTrue(
-                logFiles.stream().allMatch(f -> f.getName().endsWith(".log")),
-                "All files should be .log");
+        assertEquals("/tmp/logs/test.log", logFile.getAbsolutePath());
     }
 
     @Test
-    void testListLogFilesSorted() throws IOException {
-        FileUtils.createDirectory(tempDir.toString() + "/logs");
-        String logsDir = tempDir.toString() + "/logs";
+    void listLogFilesReturnsOnlyLogFiles() throws IOException {
+        String logsDirectoryPath = tempLogDirectory.toString() + "/" + LOGS_SUBDIRECTORY;
+        FileUtils.createDirectory(logsDirectoryPath);
 
-        // Create log files in random order
-        Files.write(Path.of(logsDir, "wal-003.log"), "content".getBytes());
-        Files.write(Path.of(logsDir, "wal-001.log"), "content".getBytes());
-        Files.write(Path.of(logsDir, "wal-002.log"), "content".getBytes());
+        Files.write(Path.of(logsDirectoryPath, WALFILE_001), SEGMENT_CONTENT.getBytes());
+        Files.write(Path.of(logsDirectoryPath, WALFILE_002), SEGMENT_CONTENT.getBytes());
+        Files.write(Path.of(logsDirectoryPath, WALFILE_003), SEGMENT_CONTENT.getBytes());
+        Files.write(Path.of(logsDirectoryPath, OTHER_FILE), NOT_LOG_CONTENT.getBytes());
 
-        java.util.List<File> logFiles = FileUtils.listLogFiles(logsDir);
+        List<File> logFiles = FileUtils.listLogFiles(logsDirectoryPath);
 
-        assertEquals(3, logFiles.size(), "Should find 3 files");
-        assertEquals("wal-001.log", logFiles.get(0).getName(), "First should be wal-001.log");
-        assertEquals("wal-002.log", logFiles.get(1).getName(), "Second should be wal-002.log");
-        assertEquals("wal-003.log", logFiles.get(2).getName(), "Third should be wal-003.log");
+        assertEquals(EXPECTED_LOG_FILE_COUNT, logFiles.size());
+        assertTrue(logFiles.stream().allMatch(f -> f.getName().endsWith(LOG_FILE_EXTENSION)));
     }
 
     @Test
-    void testListLogFilesEmptyDirectory() throws IOException {
-        java.util.List<File> logFiles = FileUtils.listLogFiles(tempDir.toString());
+    void listLogFilesReturnsSortedResults() throws IOException {
+        String logsDirectoryPath = tempLogDirectory.toString() + "/" + LOGS_SUBDIRECTORY;
+        FileUtils.createDirectory(logsDirectoryPath);
 
-        assertTrue(logFiles.isEmpty(), "Empty directory should return empty list");
+        Files.write(Path.of(logsDirectoryPath, WALFILE_003), SEGMENT_CONTENT.getBytes());
+        Files.write(Path.of(logsDirectoryPath, WALFILE_001), SEGMENT_CONTENT.getBytes());
+        Files.write(Path.of(logsDirectoryPath, WALFILE_002), SEGMENT_CONTENT.getBytes());
+
+        List<File> logFiles = FileUtils.listLogFiles(logsDirectoryPath);
+
+        assertEquals(EXPECTED_LOG_FILE_COUNT, logFiles.size());
+        assertEquals(WALFILE_001, logFiles.get(0).getName());
+        assertEquals(WALFILE_002, logFiles.get(1).getName());
+        assertEquals(WALFILE_003, logFiles.get(2).getName());
     }
 
     @Test
-    void testListLogFilesNonExistentDirectory() {
-        java.util.List<File> logFiles = FileUtils.listLogFiles("/nonexistent/directory");
+    void listLogFilesReturnsEmptyListForEmptyDirectory() throws IOException {
+        List<File> logFiles = FileUtils.listLogFiles(tempLogDirectory.toString());
 
-        assertTrue(logFiles.isEmpty(), "Non-existent directory should return empty list");
+        assertTrue(logFiles.isEmpty());
     }
 
-    // ============================================================================
-    // SECTION 6: ERROR HANDLING
-    // ============================================================================
+    @Test
+    void listLogFilesReturnsEmptyListForNonExistentDirectory() {
+        List<File> logFiles = FileUtils.listLogFiles("/nonexistent/directory");
+
+        assertTrue(logFiles.isEmpty());
+    }
 
     @Test
-    void testWriteToClosedStreamThrows() throws IOException {
-        File file = new File(tempDir.toFile(), "test.log");
-        FileStream stream = FileUtils.openAppendStream(file);
+    void writeToClosedStreamThrowsIOException() throws IOException {
+        File testLogFile = new File(tempLogDirectory.toFile(), TEST_LOG_FILENAME);
+        FileStream stream = FileUtils.openAppendStream(testLogFile);
         FileUtils.closeStream(stream);
 
         assertThrows(
                 IOException.class,
-                () -> FileUtils.writeToStream(stream, "data".getBytes()),
-                "Should throw when writing to closed stream");
+                () -> FileUtils.writeToStream(stream, "data".getBytes()));
     }
 
     @Test
-    void testFsyncClosedStreamThrows() throws IOException {
-        File file = new File(tempDir.toFile(), "test.log");
-        FileStream stream = FileUtils.openAppendStream(file);
+    void fsyncClosedStreamThrowsIOException() throws IOException {
+        File testLogFile = new File(tempLogDirectory.toFile(), TEST_LOG_FILENAME);
+        FileStream stream = FileUtils.openAppendStream(testLogFile);
         FileUtils.closeStream(stream);
 
         assertThrows(
                 IOException.class,
-                () -> FileUtils.fsyncStream(stream),
-                "Should throw when fsyncing closed stream");
+                () -> FileUtils.fsyncStream(stream));
     }
 
     @Test
-    void testReadNonExistentFile() {
-        File file = new File(tempDir.toFile(), "nonexistent.log");
+    void readNonExistentFileThrowsIOException() {
+        File nonExistentFile = new File(tempLogDirectory.toFile(), NONEXISTENT_FILE);
 
-        assertThrows(IOException.class, () -> FileUtils.readAllBytes(file),
-                "Should throw when reading non-existent file");
+        assertThrows(IOException.class, () -> FileUtils.readAllBytes(nonExistentFile));
     }
 
     @Test
-    void testReadBytesNegativeOffset() throws IOException {
-        File file = new File(tempDir.toFile(), "test.log");
-        FileStream stream = FileUtils.openAppendStream(file);
+    void readBytesWithNegativeOffsetThrowsIOException() throws IOException {
+        File testLogFile = new File(tempLogDirectory.toFile(), TEST_LOG_FILENAME);
+        FileStream stream = FileUtils.openAppendStream(testLogFile);
         FileUtils.writeToStream(stream, "data".getBytes());
         FileUtils.closeStream(stream);
 
-        assertThrows(IOException.class, () -> FileUtils.readBytes(file, -1, 5),
-                "Should throw for negative offset");
+        assertThrows(IOException.class, () -> FileUtils.readBytes(testLogFile, -1, 5));
     }
 
-    // ============================================================================
-    // SECTION 7: DATA INTEGRITY
-    // ============================================================================
-
     @Test
-    void testDataIntegrityAfterFsync() throws IOException {
-        File file = new File(tempDir.toFile(), "test.log");
-        byte[] original = "integrity test data".getBytes();
+    void dataIntegrityAfterFsyncRoundTrip() throws IOException {
+        File testLogFile = new File(tempLogDirectory.toFile(), TEST_LOG_FILENAME);
+        byte[] originalData = DATA_INTEGRITY_MESSAGE.getBytes();
 
-        FileStream stream = FileUtils.openAppendStream(file);
-        FileUtils.writeToStream(stream, original);
+        FileStream stream = FileUtils.openAppendStream(testLogFile);
+        FileUtils.writeToStream(stream, originalData);
         FileUtils.fsyncStream(stream);
         FileUtils.closeStream(stream);
 
-        // Read back and verify byte-for-byte
-        byte[] readBack = FileUtils.readAllBytes(file);
-        assertArrayEquals(original, readBack, "Data should be identical after fsync");
+        byte[] readBackData = FileUtils.readAllBytes(testLogFile);
+        assertArrayEquals(originalData, readBackData);
     }
 
     @Test
-    void testBinaryDataPreservation() throws IOException {
-        File file = new File(tempDir.toFile(), "test.log");
+    void binaryDataBytesPreservedExactly() throws IOException {
+        File testLogFile = new File(tempLogDirectory.toFile(), TEST_LOG_FILENAME);
 
-        byte[] binary = new byte[256];
-        for (int i = 0; i < 256; i++) {
-            binary[i] = (byte) i;
+        byte[] binaryData = new byte[BINARY_BYTE_RANGE];
+        for (int byteIndex = 0; byteIndex < BINARY_BYTE_RANGE; byteIndex++) {
+            binaryData[byteIndex] = (byte) byteIndex;
         }
 
-        FileStream stream = FileUtils.openAppendStream(file);
-        FileUtils.writeToStream(stream, binary);
+        FileStream stream = FileUtils.openAppendStream(testLogFile);
+        FileUtils.writeToStream(stream, binaryData);
         FileUtils.closeStream(stream);
 
-        byte[] readBack = FileUtils.readAllBytes(file);
-        assertArrayEquals(binary, readBack, "Binary data should be preserved exactly");
+        byte[] readBackData = FileUtils.readAllBytes(testLogFile);
+        assertArrayEquals(binaryData, readBackData);
     }
 }

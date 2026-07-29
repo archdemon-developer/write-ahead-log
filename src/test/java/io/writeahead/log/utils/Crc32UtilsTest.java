@@ -4,314 +4,266 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import io.writeahead.log.serdes.EntrySerdes;
 import java.io.IOException;
+import java.util.HashSet;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 
-/**
- * MILITARY-GRADE CRC TESTS FOR Crc32Utils
- *
- * <p>CRC corruption detection is foundational. If CRC is wrong:
- * - Silent data corruption possible
- * - Corrupted entries not detected on recovery
- * - System continues with bad data
- *
- * <p>These tests verify CRC correctness for production reliability.
- */
 public class Crc32UtilsTest {
 
+    private static final String SIMPLE_PAYLOAD = "hello";
+    private static final String ALTERNATIVE_PAYLOAD = "world";
+    private static final String SINGLE_BYTE_VARIANT = "hallo";
+    private static final long ARBITRARY_TIMESTAMP = 1000L;
+    private static final int SMALL_PAYLOAD_SIZE = 5;
+    private static final int LARGE_PAYLOAD_SIZE = 10000;
+    private static final int ZERO_FILLED_ARRAY_SIZE = 100;
+    private static final int MINIMUM_UNIQUE_CRC_COUNT_FOR_100_VALUES = 95;
+
     @Test
-    void testComputeSimple() {
-        byte[] data = "hello".getBytes();
+    void computeSimplePayloadProducesNonZeroPositiveCrc() {
+        byte[] simplePayloadBytes = SIMPLE_PAYLOAD.getBytes();
 
-        long crc = Crc32Utils.compute(data);
+        long computedCrc = Crc32Utils.compute(simplePayloadBytes);
 
-        // CRC should be non-zero for non-empty data
-        assertNotEquals(0, crc, "CRC should not be zero");
-        assertTrue(crc > 0, "CRC should be positive");
+        assertNotEquals(0, computedCrc);
+        assertTrue(computedCrc > 0);
     }
 
     @Test
-    void testComputeDeterministic() {
-        byte[] data = "hello".getBytes();
+    void computeIdenticalInputProducesIdenticalCrcMultipleTimes() {
+        byte[] simplePayloadBytes = SIMPLE_PAYLOAD.getBytes();
 
-        long crc1 = Crc32Utils.compute(data);
-        long crc2 = Crc32Utils.compute(data);
-        long crc3 = Crc32Utils.compute(data);
+        long crcFirstComputation = Crc32Utils.compute(simplePayloadBytes);
+        long crcSecondComputation = Crc32Utils.compute(simplePayloadBytes);
+        long crcThirdComputation = Crc32Utils.compute(simplePayloadBytes);
 
-        // CRC must be deterministic: same input = same output every time
-        assertEquals(crc1, crc2, "CRC must be deterministic (same data = same CRC)");
-        assertEquals(crc2, crc3, "CRC must be deterministic (consistent across calls)");
+        assertEquals(crcFirstComputation, crcSecondComputation);
+        assertEquals(crcSecondComputation, crcThirdComputation);
     }
 
     @Test
-    void testComputeDifferentData() {
-        byte[] data1 = "hello".getBytes();
-        byte[] data2 = "world".getBytes();
-        byte[] data3 = "hallo".getBytes(); // Changed one byte
+    void computeDifferentPaylodsProduceDifferentCrcs() {
+        byte[] simplePayloadBytes = SIMPLE_PAYLOAD.getBytes();
+        byte[] alternativePayloadBytes = ALTERNATIVE_PAYLOAD.getBytes();
+        byte[] singleByteVariantBytes = SINGLE_BYTE_VARIANT.getBytes();
 
-        long crc1 = Crc32Utils.compute(data1);
-        long crc2 = Crc32Utils.compute(data2);
-        long crc3 = Crc32Utils.compute(data3);
+        long crcSimplePayload = Crc32Utils.compute(simplePayloadBytes);
+        long crcAlternativePayload = Crc32Utils.compute(alternativePayloadBytes);
+        long crcSingleByteVariant = Crc32Utils.compute(singleByteVariantBytes);
 
-        // Different data must produce different CRC
-        assertNotEquals(crc1, crc2, "Different data must produce different CRC");
-        assertNotEquals(crc1, crc3, "Single byte change must produce different CRC");
+        assertNotEquals(crcSimplePayload, crcAlternativePayload);
+        assertNotEquals(crcSimplePayload, crcSingleByteVariant);
     }
 
     @Test
-    void testComputeSensitiveToSingleByte() {
-        byte[] data1 = "hello".getBytes();
-        byte[] data2 = "hello".getBytes();
-        data2[0] = (byte) ~data2[0]; // Flip all bits in first byte
+    void computeDetectsSingleBitFlip() {
+        byte[] originalPayloadBytes = SIMPLE_PAYLOAD.getBytes();
+        byte[] corruptedPayloadBytes = SIMPLE_PAYLOAD.getBytes();
+        corruptedPayloadBytes[0] = (byte) ~corruptedPayloadBytes[0];
 
-        long crc1 = Crc32Utils.compute(data1);
-        long crc2 = Crc32Utils.compute(data2);
+        long crcOriginal = Crc32Utils.compute(originalPayloadBytes);
+        long crcCorrupted = Crc32Utils.compute(corruptedPayloadBytes);
 
-        assertNotEquals(crc1, crc2, "CRC must detect single byte change (corruption detection)");
+        assertNotEquals(crcOriginal, crcCorrupted);
     }
 
     @Test
-    void testComputeEmptyData() {
-        byte[] emptyData = new byte[0];
+    void computeEmptyByteArrayProducesConsistentCrc() {
+        byte[] emptyPayloadBytes = new byte[0];
 
-        long crc = Crc32Utils.compute(emptyData);
+        long crcFirstComputation = Crc32Utils.compute(emptyPayloadBytes);
+        long crcSecondComputation = Crc32Utils.compute(emptyPayloadBytes);
 
-        // Empty data has specific CRC (typically 0 for CRC32)
-        assertNotNull(crc, "CRC of empty data should be valid");
-        // Don't assume it's zero, just verify it's consistent
-        long crc2 = Crc32Utils.compute(emptyData);
-        assertEquals(crc, crc2, "CRC of empty data must be deterministic");
+        assertEquals(crcFirstComputation, crcSecondComputation);
     }
 
     @Test
-    void testComputeLargeData() {
-        byte[] largeData = new byte[10000]; // 10KB
-        for (int i = 0; i < largeData.length; i++) {
-            largeData[i] = (byte) (i % 256);
+    void computeLargePayloadProducesConsistentCrc() {
+        byte[] largePayloadBytes = new byte[LARGE_PAYLOAD_SIZE];
+        for (int index = 0; index < largePayloadBytes.length; index++) {
+            largePayloadBytes[index] = (byte) (index % 256);
         }
 
-        long crc = Crc32Utils.compute(largeData);
-        long crc2 = Crc32Utils.compute(largeData);
+        long crcFirstComputation = Crc32Utils.compute(largePayloadBytes);
+        long crcSecondComputation = Crc32Utils.compute(largePayloadBytes);
 
-        // Must handle large data without crashing
-        assertEquals(crc, crc2, "Large data CRC must be deterministic");
-        assertNotEquals(0, crc, "Large data CRC should not be zero");
+        assertEquals(crcFirstComputation, crcSecondComputation);
+        assertNotEquals(0, crcFirstComputation);
     }
 
     @Test
-    void testComputeNullThrowsNpe() {
-        assertThrows(
-                NullPointerException.class,
-                () -> Crc32Utils.compute(null),
-                "Should throw NullPointerException for null data");
+    void computeNullPayloadThrowsNullPointerException() {
+        assertThrows(NullPointerException.class, () -> Crc32Utils.compute(null));
     }
 
     @Test
-    void testComputeAllZeroBytes() {
-        byte[] allZeros = new byte[100];
-        // All zeros in array
+    void computeAllZeroBytesProducesConsistentCrc() {
+        byte[] allZeroBytes = new byte[ZERO_FILLED_ARRAY_SIZE];
 
-        long crc = Crc32Utils.compute(allZeros);
+        long crcFirstComputation = Crc32Utils.compute(allZeroBytes);
+        long crcSecondComputation = Crc32Utils.compute(allZeroBytes);
 
-        // All zeros should have consistent, non-zero CRC (depends on implementation)
-        long crc2 = Crc32Utils.compute(allZeros);
-        assertEquals(crc, crc2, "All-zero data CRC must be deterministic");
+        assertEquals(crcFirstComputation, crcSecondComputation);
     }
 
     @Test
-    void testComputeAllOneBytes() {
-        byte[] allOnes = new byte[100];
-        for (int i = 0; i < allOnes.length; i++) {
-            allOnes[i] = (byte) 0xFF;
+    void computeAllOnesBytesProducesConsistentCrc() {
+        byte[] allOnesBytes = new byte[ZERO_FILLED_ARRAY_SIZE];
+        for (int index = 0; index < allOnesBytes.length; index++) {
+            allOnesBytes[index] = (byte) 0xFF;
         }
 
-        long crc = Crc32Utils.compute(allOnes);
-        long crc2 = Crc32Utils.compute(allOnes);
+        long crcFirstComputation = Crc32Utils.compute(allOnesBytes);
+        long crcSecondComputation = Crc32Utils.compute(allOnesBytes);
 
-        assertEquals(crc, crc2, "All-ones data CRC must be deterministic");
+        assertEquals(crcFirstComputation, crcSecondComputation);
     }
 
     @Test
-    void testComputeByteOrderMatters() {
-        byte[] data1 = {1, 2, 3, 4, 5};
-        byte[] data2 = {5, 4, 3, 2, 1};
+    void computeDetectsReorderedBytes() {
+        byte[] orderedSequence = {1, 2, 3, 4, 5};
+        byte[] reversedSequence = {5, 4, 3, 2, 1};
 
-        long crc1 = Crc32Utils.compute(data1);
-        long crc2 = Crc32Utils.compute(data2);
+        long crcOrdered = Crc32Utils.compute(orderedSequence);
+        long crcReversed = Crc32Utils.compute(reversedSequence);
 
-        // Different byte order must produce different CRC
-        assertNotEquals(crc1, crc2, "Byte order affects CRC (detects reordering)");
+        assertNotEquals(crcOrdered, crcReversed);
     }
 
     @Test
-    void testComputeNoAccidentalCollisions() {
-        // Generate 100 different byte arrays, all should have different CRCs
-        long[] crcs = new long[100];
-        for (int i = 0; i < 100; i++) {
-            byte[] data = new byte[4];
-            data[0] = (byte) ((i >>> 24) & 0xFF);
-            data[1] = (byte) ((i >>> 16) & 0xFF);
-            data[2] = (byte) ((i >>> 8) & 0xFF);
-            data[3] = (byte) (i & 0xFF);
-            crcs[i] = Crc32Utils.compute(data);
+    void computeProducesMostlyUniqueCrcsFor100DistinctInputs() {
+        long[] computedCrcsForDistinctInputs = new long[100];
+        for (int index = 0; index < 100; index++) {
+            byte[] sequentialDataBytes = new byte[4];
+            sequentialDataBytes[0] = (byte) ((index >>> 24) & 0xFF);
+            sequentialDataBytes[1] = (byte) ((index >>> 16) & 0xFF);
+            sequentialDataBytes[2] = (byte) ((index >>> 8) & 0xFF);
+            sequentialDataBytes[3] = (byte) (index & 0xFF);
+            computedCrcsForDistinctInputs[index] = Crc32Utils.compute(sequentialDataBytes);
         }
 
-        // Check all unique (or mostly unique - CRC32 is 32-bit so collisions possible but rare)
-        java.util.Set<Long> uniqueCrcs = new java.util.HashSet<>();
-        for (long crc : crcs) {
-            uniqueCrcs.add(crc);
+        Set<Long> uniqueCrcValues = new HashSet<>();
+        for (long crc : computedCrcsForDistinctInputs) {
+            uniqueCrcValues.add(crc);
         }
 
-        // Should have at least 95 unique out of 100 (CRC32 is 32-bit, collisions possible)
-        assertTrue(uniqueCrcs.size() >= 95, "CRC should mostly avoid collisions (got " + uniqueCrcs.size() + "/100)");
+        assertTrue(uniqueCrcValues.size() >= MINIMUM_UNIQUE_CRC_COUNT_FOR_100_VALUES);
     }
 
     @Test
-    void testComputeEntryCrcSimple() throws IOException {
-        long timestamp = 1000L;
-        int size = 5;
-        byte[] data = "hello".getBytes();
+    void computeEntryCrcWithSimplePayloadProducesNonZeroPositiveCrc() throws IOException {
+        byte[] simplePayloadBytes = SIMPLE_PAYLOAD.getBytes();
 
-        long crc = Crc32Utils.computeEntryCrc(timestamp, size, data);
+        long computedCrc = Crc32Utils.computeEntryCrc(ARBITRARY_TIMESTAMP, SMALL_PAYLOAD_SIZE, simplePayloadBytes);
 
-        // Should compute CRC of serialized entry
-        assertNotEquals(0, crc, "Entry CRC should not be zero");
-        assertTrue(crc > 0, "Entry CRC should be positive");
+        assertNotEquals(0, computedCrc);
+        assertTrue(computedCrc > 0);
     }
 
     @Test
-    void testComputeEntryCrcDeterministic() throws IOException {
-        long timestamp = 1000L;
-        int size = 5;
-        byte[] data = "hello".getBytes();
+    void computeEntryCrcIdenticalInputProducesIdenticalCrcMultipleTimes() throws IOException {
+        byte[] simplePayloadBytes = SIMPLE_PAYLOAD.getBytes();
 
-        long crc1 = Crc32Utils.computeEntryCrc(timestamp, size, data);
-        long crc2 = Crc32Utils.computeEntryCrc(timestamp, size, data);
-        long crc3 = Crc32Utils.computeEntryCrc(timestamp, size, data);
+        long crcFirstComputation = Crc32Utils.computeEntryCrc(ARBITRARY_TIMESTAMP, SMALL_PAYLOAD_SIZE, simplePayloadBytes);
+        long crcSecondComputation = Crc32Utils.computeEntryCrc(ARBITRARY_TIMESTAMP, SMALL_PAYLOAD_SIZE, simplePayloadBytes);
+        long crcThirdComputation = Crc32Utils.computeEntryCrc(ARBITRARY_TIMESTAMP, SMALL_PAYLOAD_SIZE, simplePayloadBytes);
 
-        // CRC must be deterministic
-        assertEquals(crc1, crc2, "Entry CRC must be deterministic");
-        assertEquals(crc2, crc3, "Entry CRC must be consistent");
+        assertEquals(crcFirstComputation, crcSecondComputation);
+        assertEquals(crcSecondComputation, crcThirdComputation);
     }
 
     @Test
-    void testComputeEntryCrcSensitiveToTimestamp() throws IOException {
-        int size = 5;
-        byte[] data = "hello".getBytes();
+    void computeEntryCrcDetectsDifferentTimestamps() throws IOException {
+        byte[] simplePayloadBytes = SIMPLE_PAYLOAD.getBytes();
 
-        long crc1 = Crc32Utils.computeEntryCrc(1000L, size, data);
-        long crc2 = Crc32Utils.computeEntryCrc(1001L, size, data);
-        long crc3 = Crc32Utils.computeEntryCrc(2000L, size, data);
+        long crcTimestamp1000 = Crc32Utils.computeEntryCrc(1000L, SMALL_PAYLOAD_SIZE, simplePayloadBytes);
+        long crcTimestamp1001 = Crc32Utils.computeEntryCrc(1001L, SMALL_PAYLOAD_SIZE, simplePayloadBytes);
+        long crcTimestamp2000 = Crc32Utils.computeEntryCrc(2000L, SMALL_PAYLOAD_SIZE, simplePayloadBytes);
 
-        // Different timestamps must produce different CRCs
-        assertNotEquals(crc1, crc2, "Different timestamp should produce different CRC");
-        assertNotEquals(crc1, crc3, "Different timestamp should produce different CRC");
+        assertNotEquals(crcTimestamp1000, crcTimestamp1001);
+        assertNotEquals(crcTimestamp1000, crcTimestamp2000);
     }
 
     @Test
-    void testComputeEntryCrcSensitiveToData() throws IOException {
-        long timestamp = 1000L;
-        int size1 = 5;
-        byte[] data1 = "hello".getBytes();
-        int size2 = 5;
-        byte[] data2 = "hallo".getBytes();
+    void computeEntryCrcDetectsDifferentPayloads() throws IOException {
+        long timestamp = ARBITRARY_TIMESTAMP;
 
-        long crc1 = Crc32Utils.computeEntryCrc(timestamp, size1, data1);
-        long crc2 = Crc32Utils.computeEntryCrc(timestamp, size2, data2);
+        long crcSimplePayload = Crc32Utils.computeEntryCrc(timestamp, SMALL_PAYLOAD_SIZE, SIMPLE_PAYLOAD.getBytes());
+        long crcAlternativePayload = Crc32Utils.computeEntryCrc(timestamp, SMALL_PAYLOAD_SIZE, ALTERNATIVE_PAYLOAD.getBytes());
 
-        // Different data must produce different CRC
-        assertNotEquals(crc1, crc2, "Different data should produce different CRC");
+        assertNotEquals(crcSimplePayload, crcAlternativePayload);
     }
 
     @Test
-    void testComputeEntryCrcSensitiveToSize() throws IOException {
-        long timestamp = 1000L;
-        byte[] data = "hello".getBytes();
+    void computeEntryCrcDetectsDifferentSizes() throws IOException {
+        long timestamp = ARBITRARY_TIMESTAMP;
+        byte[] simplePayloadBytes = SIMPLE_PAYLOAD.getBytes();
 
-        long crc1 = Crc32Utils.computeEntryCrc(timestamp, 5, data);
-        long crc2 = Crc32Utils.computeEntryCrc(timestamp, 6, data); // Lie about size
+        long crcSize5 = Crc32Utils.computeEntryCrc(timestamp, 5, simplePayloadBytes);
+        long crcSize6 = Crc32Utils.computeEntryCrc(timestamp, 6, simplePayloadBytes);
 
-        // Different size should produce different CRC
-        assertNotEquals(crc1, crc2, "Different size should produce different CRC");
+        assertNotEquals(crcSize5, crcSize6);
     }
 
     @Test
-    void testComputeEntryCrcEmptyData() throws IOException {
-        long timestamp = 1000L;
-        int size = 0;
-        byte[] data = new byte[0];
+    void computeEntryCrcEmptyPayloadProducesConsistentCrc() throws IOException {
+        byte[] emptyPayloadBytes = new byte[0];
 
-        long crc = Crc32Utils.computeEntryCrc(timestamp, size, data);
+        long crcFirstComputation = Crc32Utils.computeEntryCrc(ARBITRARY_TIMESTAMP, 0, emptyPayloadBytes);
+        long crcSecondComputation = Crc32Utils.computeEntryCrc(ARBITRARY_TIMESTAMP, 0, emptyPayloadBytes);
 
-        // Should handle empty data
-        assertNotNull(crc, "CRC of empty entry should be valid");
-        long crc2 = Crc32Utils.computeEntryCrc(timestamp, size, data);
-        assertEquals(crc, crc2, "Empty entry CRC must be deterministic");
+        assertEquals(crcFirstComputation, crcSecondComputation);
     }
 
     @Test
-    void testComputeEntryCrcLargeData() throws IOException {
-        long timestamp = 1000L;
-        byte[] largeData = new byte[1000];
-        for (int i = 0; i < largeData.length; i++) {
-            largeData[i] = (byte) (i % 256);
-        }
-        int size = largeData.length;
-
-        long crc = Crc32Utils.computeEntryCrc(timestamp, size, largeData);
-
-        // Should handle large data
-        assertNotNull(crc, "CRC of large entry should be valid");
-        assertNotEquals(0, crc, "CRC of large entry should not be zero");
-    }
-
-    @Test
-    void testComputeEntryCrcExtremeTimestamps() throws IOException {
-        int size = 5;
-        byte[] data = "hello".getBytes();
-
-        long[] timestamps = {Long.MIN_VALUE, -1L, 0L, 1L, Long.MAX_VALUE};
-        long[] crcs = new long[timestamps.length];
-
-        for (int i = 0; i < timestamps.length; i++) {
-            crcs[i] = Crc32Utils.computeEntryCrc(timestamps[i], size, data);
+    void computeEntryCrcLargePayloadProducesValidCrc() throws IOException {
+        byte[] largePayloadBytes = new byte[LARGE_PAYLOAD_SIZE];
+        for (int index = 0; index < largePayloadBytes.length; index++) {
+            largePayloadBytes[index] = (byte) (index % 256);
         }
 
-        // All different timestamps should produce different CRCs
-        java.util.Set<Long> uniqueCrcs = new java.util.HashSet<>();
-        for (long crc : crcs) {
-            uniqueCrcs.add(crc);
+        long computedCrc = Crc32Utils.computeEntryCrc(ARBITRARY_TIMESTAMP, LARGE_PAYLOAD_SIZE, largePayloadBytes);
+
+        assertNotEquals(0, computedCrc);
+    }
+
+    @Test
+    void computeEntryCrcExtremeTimestampsProducesMostlyUniqueCrcs() throws IOException {
+        byte[] simplePayloadBytes = SIMPLE_PAYLOAD.getBytes();
+        long[] extremeTimestampValues = {Long.MIN_VALUE, -1L, 0L, 1L, Long.MAX_VALUE};
+        long[] computedCrcsForExtremeTimestamps = new long[extremeTimestampValues.length];
+
+        for (int index = 0; index < extremeTimestampValues.length; index++) {
+            computedCrcsForExtremeTimestamps[index] = Crc32Utils.computeEntryCrc(extremeTimestampValues[index], SMALL_PAYLOAD_SIZE, simplePayloadBytes);
         }
 
-        // Should have all 5 unique (or very likely)
-        assertTrue(uniqueCrcs.size() >= 4, "Extreme timestamps should produce mostly different CRCs");
+        Set<Long> uniqueCrcValues = new HashSet<>();
+        for (long crc : computedCrcsForExtremeTimestamps) {
+            uniqueCrcValues.add(crc);
+        }
+
+        assertTrue(uniqueCrcValues.size() >= 4);
     }
 
     @Test
-    void testComputeMatchesSerializedCrc() throws IOException {
-        long timestamp = 1000L;
-        int size = 5;
-        byte[] data = "hello".getBytes();
+    void computeEntryCrcMatchesComputeOfSerializedEntry() throws IOException {
+        long timestamp = ARBITRARY_TIMESTAMP;
+        int size = SMALL_PAYLOAD_SIZE;
+        byte[] simplePayloadBytes = SIMPLE_PAYLOAD.getBytes();
 
-        // CRC of entry should match CRC of serialized entry
-        byte[] serialized = EntrySerdes.serializeEntrySanseCrc(timestamp, size, data);
-        long crcDirect = Crc32Utils.compute(serialized);
-        long crcEntry = Crc32Utils.computeEntryCrc(timestamp, size, data);
+        byte[] serializedEntryBytes = EntrySerdes.serializeEntrySanseCrc(timestamp, size, simplePayloadBytes);
+        long crcOfSerializedEntry = Crc32Utils.compute(serializedEntryBytes);
+        long crcViaEntryMethod = Crc32Utils.computeEntryCrc(timestamp, size, simplePayloadBytes);
 
-        assertEquals(
-                crcDirect,
-                crcEntry,
-                "computeEntryCrc should match compute() of serialized entry");
+        assertEquals(crcOfSerializedEntry, crcViaEntryMethod);
     }
 
     @Test
-    void testComputeEntryCrcNotZero() throws IOException {
-        long timestamp = 1000L;
-        int size = 4;
-        byte[] data = "test".getBytes();
+    void computeEntryCrcProducesNonZeroCrc() throws IOException {
+        byte[] testPayloadBytes = "test".getBytes();
 
-        long crc = Crc32Utils.computeEntryCrc(timestamp, size, data);
+        long computedCrc = Crc32Utils.computeEntryCrc(ARBITRARY_TIMESTAMP, 4, testPayloadBytes);
 
-        // CRC of 0 would be suspicious (might indicate uninitialized)
-        assertNotEquals(0, crc, "Entry CRC should not be 0 (suspicious value)");
+        assertNotEquals(0, computedCrc);
     }
 }

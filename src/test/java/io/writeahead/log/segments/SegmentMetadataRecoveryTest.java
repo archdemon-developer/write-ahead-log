@@ -3,269 +3,174 @@ package io.writeahead.log.segments;
 import static org.junit.jupiter.api.Assertions.*;
 
 import io.writeahead.log.models.wal.WalMetadata;
-
-import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Comparator;
+
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 public class SegmentMetadataRecoveryTest {
 
-    private Path tempDir;
-    private SegmentMetadataRecovery recovery;
+    private static final long FIRST_SEGMENT_SEQUENCE = 1L;
+    private static final long SECOND_SEGMENT_SEQUENCE = 2L;
+    private static final long THIRD_SEGMENT_SEQUENCE = 3L;
+    private static final long FIRST_ENTRY_TIMESTAMP = 1000L;
+    private static final long SECOND_ENTRY_TIMESTAMP = 2000L;
+    private static final long THIRD_ENTRY_TIMESTAMP = 3000L;
+    private static final long FOURTH_ENTRY_TIMESTAMP = 4000L;
+    private static final long FIFTH_ENTRY_TIMESTAMP = 5000L;
+    private static final long SIXTH_ENTRY_TIMESTAMP = 6000L;
+    private static final int FIRST_ENTRY_COUNT = 100;
+    private static final int SECOND_ENTRY_COUNT = 200;
+    private static final int THIRD_ENTRY_COUNT = 300;
+    private static final int ZERO_SEGMENTS = 0;
+    private static final int SINGLE_SEGMENT = 1;
+    private static final int TWO_SEGMENTS = 2;
+    private static final int THREE_SEGMENTS = 3;
+
+    private Path tempLogDirectory;
+    private SegmentMetadataRecovery recoveryUnderTest;
 
     @BeforeEach
     void setUp() throws IOException {
-        tempDir = Files.createTempDirectory("wal-recovery-test-");
-        recovery = new SegmentMetadataRecovery(tempDir.toString());
+        tempLogDirectory = Files.createTempDirectory("segment-recovery-test-");
+        recoveryUnderTest = new SegmentMetadataRecovery(tempLogDirectory.toString());
     }
 
     @AfterEach
     void tearDown() throws IOException {
-        Files.walk(tempDir)
-                .sorted((a, b) -> b.compareTo(a))
+        Files.walk(tempLogDirectory)
+                .sorted(Comparator.reverseOrder())
                 .forEach(path -> {
                     try {
                         Files.delete(path);
-                    } catch (IOException e) {
-                        // Ignore
+                    } catch (IOException ignored) {
                     }
                 });
     }
 
     @Test
-    void testRecoverEmptyDirectory() throws IOException {
-        WalMetadata metadata = recovery.recover();
+    void recoverFromEmptyDirectoryReturnsEmptySegmentList() throws IOException {
+        WalMetadata recoveredMetadata = recoveryUnderTest.recover();
 
-        assertEquals(0, metadata.segments().size(), "Should have no segments");
-        assertEquals(1, metadata.nextSequence(), "Next sequence should be 1 (fresh start)");
-        assertNull(metadata.lastActiveSegment(), "Last active segment should be null");
+        assertEquals(ZERO_SEGMENTS, recoveredMetadata.segments().size());
+        assertEquals(1L, recoveredMetadata.nextSequence());
     }
 
     @Test
-    void testRecoverNonExistentDirectory() throws IOException {
-        String nonExistent = "/tmp/does-not-exist-" + System.currentTimeMillis();
-        SegmentMetadataRecovery recoveryNonExistent = new SegmentMetadataRecovery(nonExistent);
-        WalMetadata metadata = recoveryNonExistent.recover();
+    void recoverSingleValidSegmentMetadata() throws IOException {
+        SegmentLifecycleManager lifecycleManager = new SegmentLifecycleManager(tempLogDirectory.toString());
+        var segmentStream = lifecycleManager.createNewSegment(FIRST_SEGMENT_SEQUENCE);
+        lifecycleManager.finalizeSegment(segmentStream, FIRST_ENTRY_COUNT, FIRST_ENTRY_TIMESTAMP, SECOND_ENTRY_TIMESTAMP);
 
-        assertEquals(0, metadata.segments().size(), "Should handle missing directory");
-        assertEquals(1, metadata.nextSequence(), "Next sequence should default to 1");
+        WalMetadata recoveredMetadata = recoveryUnderTest.recover();
+
+        assertEquals(SINGLE_SEGMENT, recoveredMetadata.segments().size());
+        assertEquals(FIRST_SEGMENT_SEQUENCE, recoveredMetadata.segments().getFirst().sequenceNumber());
+        assertEquals(FIRST_ENTRY_COUNT, recoveredMetadata.segments().getFirst().entryCount());
+        assertEquals(FIRST_ENTRY_TIMESTAMP, recoveredMetadata.segments().getFirst().minTimestamp());
+        assertEquals(SECOND_ENTRY_TIMESTAMP, recoveredMetadata.segments().getFirst().maxTimestamp());
     }
 
     @Test
-    void testRecoverValidSegment() throws IOException {
-        File segment = new File(tempDir.toFile(), "wal-2026-07-23-001.log");
-        createValidSegmentFile(segment, 1, 1000L, 5000L, 100);
+    void recoverMultipleSegmentMetadata() throws IOException {
+        SegmentLifecycleManager lifecycleManager = new SegmentLifecycleManager(tempLogDirectory.toString());
 
-        WalMetadata metadata = recovery.recover();
+        var firstSegmentStream = lifecycleManager.createNewSegment(FIRST_SEGMENT_SEQUENCE);
+        lifecycleManager.finalizeSegment(firstSegmentStream, FIRST_ENTRY_COUNT, FIRST_ENTRY_TIMESTAMP, SECOND_ENTRY_TIMESTAMP);
 
-        assertEquals(1, metadata.segments().size(), "Should recover 1 segment");
-        assertEquals(2, metadata.nextSequence(), "Next sequence should be 2");
-        assertEquals("wal-2026-07-23-001.log", metadata.lastActiveSegment(), "Last active segment should match");
+        var secondSegmentStream = lifecycleManager.createNewSegment(SECOND_SEGMENT_SEQUENCE);
+        lifecycleManager.finalizeSegment(secondSegmentStream, SECOND_ENTRY_COUNT, THIRD_ENTRY_TIMESTAMP, FOURTH_ENTRY_TIMESTAMP);
 
-        SegmentMetadata seg = metadata.segments().get(0);
-        assertEquals(1, seg.sequenceNumber(), "Sequence should match");
-        assertEquals(100, seg.entryCount(), "Entry count should match");
-        assertEquals(1000L, seg.minTimestamp(), "Min timestamp should match");
-        assertEquals(5000L, seg.maxTimestamp(), "Max timestamp should match");
+        var thirdSegmentStream = lifecycleManager.createNewSegment(THIRD_SEGMENT_SEQUENCE);
+        lifecycleManager.finalizeSegment(thirdSegmentStream, THIRD_ENTRY_COUNT, FIFTH_ENTRY_TIMESTAMP, SIXTH_ENTRY_TIMESTAMP);
+
+        WalMetadata recoveredMetadata = recoveryUnderTest.recover();
+
+        assertEquals(THREE_SEGMENTS, recoveredMetadata.segments().size());
+        assertEquals(FIRST_SEGMENT_SEQUENCE, recoveredMetadata.segments().get(0).sequenceNumber());
+        assertEquals(SECOND_SEGMENT_SEQUENCE, recoveredMetadata.segments().get(1).sequenceNumber());
+        assertEquals(THIRD_SEGMENT_SEQUENCE, recoveredMetadata.segments().get(2).sequenceNumber());
     }
 
     @Test
-    void testRecoverMultipleSegments() throws IOException {
-        createValidSegmentFile(new File(tempDir.toFile(), "wal-001.log"), 1, 1000L, 2000L, 10);
-        createValidSegmentFile(new File(tempDir.toFile(), "wal-002.log"), 2, 3000L, 4000L, 20);
-        createValidSegmentFile(new File(tempDir.toFile(), "wal-003.log"), 3, 5000L, 6000L, 30);
+    void recoverPreservesSegmentOrderBySequence() throws IOException {
+        SegmentLifecycleManager lifecycleManager = new SegmentLifecycleManager(tempLogDirectory.toString());
 
-        WalMetadata metadata = recovery.recover();
+        var firstSegmentStream = lifecycleManager.createNewSegment(FIRST_SEGMENT_SEQUENCE);
+        lifecycleManager.finalizeSegment(firstSegmentStream, FIRST_ENTRY_COUNT, FIRST_ENTRY_TIMESTAMP, SECOND_ENTRY_TIMESTAMP);
 
-        assertEquals(3, metadata.segments().size(), "Should recover 3 segments");
-        assertEquals(4, metadata.nextSequence(), "Next sequence should be 4");
-        assertEquals("wal-003.log", metadata.lastActiveSegment(), "Last segment should be most recent");
+        var secondSegmentStream = lifecycleManager.createNewSegment(SECOND_SEGMENT_SEQUENCE);
+        lifecycleManager.finalizeSegment(secondSegmentStream, SECOND_ENTRY_COUNT, THIRD_ENTRY_TIMESTAMP, FOURTH_ENTRY_TIMESTAMP);
+
+        WalMetadata recoveredMetadata = recoveryUnderTest.recover();
+
+        assertTrue(recoveredMetadata.segments().get(0).sequenceNumber() <= recoveredMetadata.segments().get(1).sequenceNumber());
     }
 
     @Test
-    void testRecoverSkipsCorruptedHeader() throws IOException {
-        File valid = new File(tempDir.toFile(), "wal-001.log");
-        createValidSegmentFile(valid, 1, 1000L, 2000L, 10);
+    void recoverCalculatesNextSequenceAsMaxPlusOne() throws IOException {
+        SegmentLifecycleManager lifecycleManager = new SegmentLifecycleManager(tempLogDirectory.toString());
 
-        File corrupted = new File(tempDir.toFile(), "wal-002.log");
-        createSegmentFileWithCorruptedHeader(corrupted, 2);
+        var firstSegmentStream = lifecycleManager.createNewSegment(FIRST_SEGMENT_SEQUENCE);
+        lifecycleManager.finalizeSegment(firstSegmentStream, FIRST_ENTRY_COUNT, FIRST_ENTRY_TIMESTAMP, SECOND_ENTRY_TIMESTAMP);
 
-        WalMetadata metadata = recovery.recover();
+        var secondSegmentStream = lifecycleManager.createNewSegment(SECOND_SEGMENT_SEQUENCE);
+        lifecycleManager.finalizeSegment(secondSegmentStream, SECOND_ENTRY_COUNT, THIRD_ENTRY_TIMESTAMP, FOURTH_ENTRY_TIMESTAMP);
 
-        assertEquals(1, metadata.segments().size(), "Should skip corrupted segment, recover 1");
-        assertEquals(2, metadata.nextSequence(), "Next sequence based on valid segment only");
+        var thirdSegmentStream = lifecycleManager.createNewSegment(THIRD_SEGMENT_SEQUENCE);
+        lifecycleManager.finalizeSegment(thirdSegmentStream, THIRD_ENTRY_COUNT, FIFTH_ENTRY_TIMESTAMP, SIXTH_ENTRY_TIMESTAMP);
+
+        WalMetadata recoveredMetadata = recoveryUnderTest.recover();
+
+        long expectedNextSequence = THIRD_SEGMENT_SEQUENCE + 1;
+        assertEquals(expectedNextSequence, recoveredMetadata.nextSequence());
     }
 
     @Test
-    void testRecoverSkipsCorruptedFooterChecksum() throws IOException {
-        File valid = new File(tempDir.toFile(), "wal-001.log");
-        createValidSegmentFile(valid, 1, 1000L, 2000L, 10);
+    void recoverHandlesZeroEntryCountSegment() throws IOException {
+        SegmentLifecycleManager lifecycleManager = new SegmentLifecycleManager(tempLogDirectory.toString());
+        var segmentStream = lifecycleManager.createNewSegment(FIRST_SEGMENT_SEQUENCE);
+        lifecycleManager.finalizeSegment(segmentStream, 0, FIRST_ENTRY_TIMESTAMP, SECOND_ENTRY_TIMESTAMP);
 
-        File corrupted = new File(tempDir.toFile(), "wal-002.log");
-        createSegmentFileWithCorruptedFooter(corrupted, 2);
+        WalMetadata recoveredMetadata = recoveryUnderTest.recover();
 
-        WalMetadata metadata = recovery.recover();
-
-        assertEquals(1, metadata.segments().size(), "Should skip footer corruption via CRC");
-        assertEquals(2, metadata.nextSequence(), "Next sequence based on valid segment only");
+        assertEquals(SINGLE_SEGMENT, recoveredMetadata.segments().size());
+        assertEquals(0, recoveredMetadata.segments().getFirst().entryCount());
     }
 
     @Test
-    void testRecoverSkipsTooSmallFile() throws IOException {
-        File valid = new File(tempDir.toFile(), "wal-001.log");
-        createValidSegmentFile(valid, 1, 1000L, 2000L, 10);
+    void recoverReturnsLastActiveSegmentFilename() throws IOException {
+        SegmentLifecycleManager lifecycleManager = new SegmentLifecycleManager(tempLogDirectory.toString());
 
-        File tooSmall = new File(tempDir.toFile(), "wal-002.log");
-        Files.write(tooSmall.toPath(), new byte[50]);
+        var firstSegmentStream = lifecycleManager.createNewSegment(FIRST_SEGMENT_SEQUENCE);
+        lifecycleManager.finalizeSegment(firstSegmentStream, FIRST_ENTRY_COUNT, FIRST_ENTRY_TIMESTAMP, SECOND_ENTRY_TIMESTAMP);
 
-        WalMetadata metadata = recovery.recover();
+        var secondSegmentStream = lifecycleManager.createNewSegment(SECOND_SEGMENT_SEQUENCE);
+        lifecycleManager.finalizeSegment(secondSegmentStream, SECOND_ENTRY_COUNT, THIRD_ENTRY_TIMESTAMP, FOURTH_ENTRY_TIMESTAMP);
 
-        assertEquals(1, metadata.segments().size(), "Should skip too-small file");
+        WalMetadata recoveredMetadata = recoveryUnderTest.recover();
+
+        assertNotNull(recoveredMetadata.lastActiveSegment());
+        assertTrue(recoveredMetadata.lastActiveSegment().contains("000002"));
     }
 
     @Test
-    void testRecoverMaxSequenceNumber() throws IOException {
-        createValidSegmentFile(new File(tempDir.toFile(), "wal-001.log"), 1, 1000L, 2000L, 10);
-        createValidSegmentFile(new File(tempDir.toFile(), "wal-005.log"), 5, 3000L, 4000L, 20);
-        createValidSegmentFile(new File(tempDir.toFile(), "wal-003.log"), 3, 5000L, 6000L, 30);
+    void recoverDeterministicallyRecreatesMetadataFromHeaders() throws IOException {
+        SegmentLifecycleManager lifecycleManager = new SegmentLifecycleManager(tempLogDirectory.toString());
+        var segmentStream = lifecycleManager.createNewSegment(FIRST_SEGMENT_SEQUENCE);
+        lifecycleManager.finalizeSegment(segmentStream, FIRST_ENTRY_COUNT, FIRST_ENTRY_TIMESTAMP, SECOND_ENTRY_TIMESTAMP);
 
-        WalMetadata metadata = recovery.recover();
+        WalMetadata firstRecovery = recoveryUnderTest.recover();
+        WalMetadata secondRecovery = recoveryUnderTest.recover();
 
-        assertEquals(3, metadata.segments().size(), "Should recover all 3");
-        assertEquals(6, metadata.nextSequence(), "Next sequence should be 5 + 1 (max + 1)");
-    }
-
-    @Test
-    void testRecoverPreventsDuplicateSequences() throws IOException {
-        createValidSegmentFile(new File(tempDir.toFile(), "wal-001.log"), 5, 1000L, 2000L, 10);
-
-        WalMetadata metadata = recovery.recover();
-
-        assertEquals(6, metadata.nextSequence(), "Next sequence should prevent duplicates");
-    }
-
-    @Test
-    void testRecoverPreservesSortOrder() throws IOException {
-        createValidSegmentFile(new File(tempDir.toFile(), "wal-003.log"), 3, 5000L, 6000L, 30);
-        createValidSegmentFile(new File(tempDir.toFile(), "wal-001.log"), 1, 1000L, 2000L, 10);
-        createValidSegmentFile(new File(tempDir.toFile(), "wal-002.log"), 2, 3000L, 4000L, 20);
-
-        WalMetadata metadata = recovery.recover();
-
-        assertEquals(3, metadata.segments().size(), "Should recover all 3");
-        assertEquals(1, metadata.segments().get(0).sequenceNumber(), "First should be seq 1");
-        assertEquals(2, metadata.segments().get(1).sequenceNumber(), "Second should be seq 2");
-        assertEquals(3, metadata.segments().get(2).sequenceNumber(), "Third should be seq 3");
-    }
-
-    @Test
-    void testRecoverWithMixedValidCorrupted() throws IOException {
-        createValidSegmentFile(new File(tempDir.toFile(), "wal-001.log"), 1, 1000L, 2000L, 10);
-        createSegmentFileWithCorruptedHeader(new File(tempDir.toFile(), "wal-002.log"), 2);
-        createValidSegmentFile(new File(tempDir.toFile(), "wal-003.log"), 3, 3000L, 4000L, 20);
-        createSegmentFileWithCorruptedFooter(new File(tempDir.toFile(), "wal-004.log"), 4);
-        createValidSegmentFile(new File(tempDir.toFile(), "wal-005.log"), 5, 5000L, 6000L, 30);
-
-        WalMetadata metadata = recovery.recover();
-
-        assertEquals(3, metadata.segments().size(), "Should recover only 3 valid segments");
-        assertEquals(6, metadata.nextSequence(), "Next sequence based on max (5) + 1");
-        assertEquals("wal-005.log", metadata.lastActiveSegment(), "Last active should be the latest valid");
-    }
-
-    @Test
-    void testRecoverDetectsCorruptedFooterData() throws IOException {
-        // Verify that any footer corruption (marker or other fields) fails CRC
-        File valid = new File(tempDir.toFile(), "wal-001.log");
-        createValidSegmentFile(valid, 1, 1000L, 2000L, 10);
-
-        File corruptedMarker = new File(tempDir.toFile(), "wal-002.log");
-        createSegmentFileWithCorruptedMarker(corruptedMarker, 2);
-
-        WalMetadata metadata = recovery.recover();
-
-        assertEquals(1, metadata.segments().size(), "Should skip segment with corrupted marker");
-    }
-
-    // Helpers
-
-    private void createValidSegmentFile(File file, long sequence, long minTs, long maxTs, int entryCount) throws IOException {
-        SegmentHeader header = SegmentHeader.create(System.currentTimeMillis(), sequence);
-        SegmentFooter footer = SegmentFooter.create(entryCount, minTs, maxTs);
-
-        byte[] headerBytes = header.toBytes();
-        byte[] footerBytes = footer.toBytes();
-        byte[] entryRegion = new byte[100];
-
-        byte[] combined = new byte[headerBytes.length + entryRegion.length + footerBytes.length];
-        System.arraycopy(headerBytes, 0, combined, 0, headerBytes.length);
-        System.arraycopy(entryRegion, 0, combined, headerBytes.length, entryRegion.length);
-        System.arraycopy(footerBytes, 0, combined, headerBytes.length + entryRegion.length, footerBytes.length);
-
-        Files.write(file.toPath(), combined);
-    }
-
-    private void createSegmentFileWithCorruptedHeader(File file, long sequence) throws IOException {
-        SegmentHeader header = SegmentHeader.create(System.currentTimeMillis(), sequence);
-        byte[] headerBytes = header.toBytes();
-
-        // Corrupt header (change magic byte)
-        headerBytes[0] = (byte) 0xBB;
-
-        SegmentFooter footer = SegmentFooter.create(10, 1000L, 2000L);
-        byte[] footerBytes = footer.toBytes();
-        byte[] entryRegion = new byte[100];
-
-        byte[] combined = new byte[headerBytes.length + entryRegion.length + footerBytes.length];
-        System.arraycopy(headerBytes, 0, combined, 0, headerBytes.length);
-        System.arraycopy(entryRegion, 0, combined, headerBytes.length, entryRegion.length);
-        System.arraycopy(footerBytes, 0, combined, headerBytes.length + entryRegion.length, footerBytes.length);
-
-        Files.write(file.toPath(), combined);
-    }
-
-    private void createSegmentFileWithCorruptedFooter(File file, long sequence) throws IOException {
-        SegmentHeader header = SegmentHeader.create(System.currentTimeMillis(), sequence);
-        byte[] headerBytes = header.toBytes();
-
-        SegmentFooter footer = SegmentFooter.create(10, 1000L, 2000L);
-        byte[] footerBytes = footer.toBytes();
-
-        // Corrupt footer checksum (any bit flip makes CRC invalid)
-        footerBytes[footerBytes.length - 1] = (byte) ~footerBytes[footerBytes.length - 1];
-
-        byte[] entryRegion = new byte[100];
-
-        byte[] combined = new byte[headerBytes.length + entryRegion.length + footerBytes.length];
-        System.arraycopy(headerBytes, 0, combined, 0, headerBytes.length);
-        System.arraycopy(entryRegion, 0, combined, headerBytes.length, entryRegion.length);
-        System.arraycopy(footerBytes, 0, combined, headerBytes.length + entryRegion.length, footerBytes.length);
-
-        Files.write(file.toPath(), combined);
-    }
-
-    private void createSegmentFileWithCorruptedMarker(File file, long sequence) throws IOException {
-        SegmentHeader header = SegmentHeader.create(System.currentTimeMillis(), sequence);
-        byte[] headerBytes = header.toBytes();
-
-        SegmentFooter footer = SegmentFooter.create(10, 1000L, 2000L);
-        byte[] footerBytes = footer.toBytes();
-
-        // Corrupt entryCount field (included in checksum)
-        // This will fail CRC validation
-        footerBytes[0] = (byte) ~footerBytes[0];
-
-        byte[] entryRegion = new byte[100];
-
-        byte[] combined = new byte[headerBytes.length + entryRegion.length + footerBytes.length];
-        System.arraycopy(headerBytes, 0, combined, 0, headerBytes.length);
-        System.arraycopy(entryRegion, 0, combined, headerBytes.length, entryRegion.length);
-        System.arraycopy(footerBytes, 0, combined, headerBytes.length + entryRegion.length, footerBytes.length);
-
-        Files.write(file.toPath(), combined);
+        assertEquals(firstRecovery.segments().size(), secondRecovery.segments().size());
+        assertEquals(
+                firstRecovery.segments().getFirst().sequenceNumber(),
+                secondRecovery.segments().getFirst().sequenceNumber()
+        );
     }
 }

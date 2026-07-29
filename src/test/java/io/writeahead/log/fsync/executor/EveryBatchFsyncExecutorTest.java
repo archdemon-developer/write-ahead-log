@@ -12,47 +12,46 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-/**
- * MILITARY-GRADE TEST SUITE FOR EVERYBATCHFSYNCEXECUTOR
- *
- * <p>Tests that fsync is called exactly when batches complete.
- * - onEntryWritten() should NOT fsync
- * - onBatchComplete() SHOULD fsync
- * - Retry strategy is invoked correctly
- */
 public class EveryBatchFsyncExecutorTest {
 
-    private Path tempDir;
-    private Path tempFile;
-    private FileStream fileStream;
-    private TrackingFsyncRetryStrategy retryStrategy;
-    private EveryBatchFsyncExecutor executor;
+    private static final int NO_FSYNC_CALLS = 0;
+    private static final int SINGLE_BATCH_FSYNC = 1;
+    private static final int TWO_BATCH_FSYNCS = 2;
+    private static final int THREE_BATCH_FSYNCS = 3;
+    private static final int TEN_BATCH_FSYNCS = 10;
+    private static final int FIVE_BATCH_FSYNCS = 5;
+
+    private Path tempFileSystemDirectory;
+    private Path tempLogFile;
+    private FileStream fileStreamForLogFile;
+    private TrackingFsyncRetryStrategyForTesting testingRetryStrategy;
+    private EveryBatchFsyncExecutor executorUnderTest;
 
     @BeforeEach
     void setUp() throws IOException {
-        tempDir = Files.createTempDirectory("fsync-executor-test-");
-        tempFile = tempDir.resolve("test.log");
-        Files.createFile(tempFile);
+        tempFileSystemDirectory = Files.createTempDirectory("fsync-executor-test-");
+        tempLogFile = tempFileSystemDirectory.resolve("test.log");
+        Files.createFile(tempLogFile);
 
-        fileStream = new FileStream(
-                new java.io.FileOutputStream(tempFile.toFile(), true),
-                new java.io.DataOutputStream(new java.io.FileOutputStream(tempFile.toFile(), true))
+        fileStreamForLogFile = new FileStream(
+                new java.io.FileOutputStream(tempLogFile.toFile(), true),
+                new java.io.DataOutputStream(new java.io.FileOutputStream(tempLogFile.toFile(), true))
         );
 
-        retryStrategy = new TrackingFsyncRetryStrategy();
-        executor = new EveryBatchFsyncExecutor(retryStrategy, fileStream);
+        testingRetryStrategy = new TrackingFsyncRetryStrategyForTesting();
+        executorUnderTest = new EveryBatchFsyncExecutor(testingRetryStrategy, fileStreamForLogFile);
     }
 
     @AfterEach
     void tearDown() throws IOException {
-        if (fileStream != null) {
+        if (fileStreamForLogFile != null) {
             try {
-                fileStream.dataOutputStream().close();
+                fileStreamForLogFile.dataOutputStream().close();
             } catch (Exception ignored) {
             }
         }
 
-        Files.walk(tempDir)
+        Files.walk(tempFileSystemDirectory)
                 .sorted((a, b) -> b.compareTo(a))
                 .forEach(
                         path -> {
@@ -64,116 +63,143 @@ public class EveryBatchFsyncExecutorTest {
     }
 
     @Test
-    void testOnEntryWrittenDoesNotCallRetry() throws IOException {
-        executor.onEntryWritten();
+    void onEntryWrittenDoesNotTriggerFsync() throws IOException {
+        executorUnderTest.onEntryWritten();
 
-        assertEquals(0, retryStrategy.callCount(),
-                "onEntryWritten() should not trigger retry strategy");
+        assertEquals(NO_FSYNC_CALLS, testingRetryStrategy.totalCallsToRetryStrategy());
     }
 
     @Test
-    void testOnBatchCompleteCallsRetry() throws IOException {
-        executor.onBatchComplete();
+    void onBatchCompleteTriggersExactlyOneFsync() throws IOException {
+        executorUnderTest.onBatchComplete();
 
-        assertEquals(1, retryStrategy.callCount(),
-                "onBatchComplete() should call retry strategy once");
+        assertEquals(SINGLE_BATCH_FSYNC, testingRetryStrategy.totalCallsToRetryStrategy());
     }
 
     @Test
-    void testMultipleEntriesFollowedByBatchCompleteOnly() throws IOException {
-        executor.onEntryWritten();
-        executor.onEntryWritten();
-        executor.onEntryWritten();
+    void multipleEntriesWithoutBatchCompleteDoNotTriggerFsync() throws IOException {
+        executorUnderTest.onEntryWritten();
+        executorUnderTest.onEntryWritten();
+        executorUnderTest.onEntryWritten();
 
-        assertEquals(0, retryStrategy.callCount(),
-                "Three onEntryWritten() calls should not trigger fsync");
+        assertEquals(NO_FSYNC_CALLS, testingRetryStrategy.totalCallsToRetryStrategy());
 
-        executor.onBatchComplete();
+        executorUnderTest.onBatchComplete();
 
-        assertEquals(1, retryStrategy.callCount(),
-                "onBatchComplete() should trigger fsync exactly once");
+        assertEquals(SINGLE_BATCH_FSYNC, testingRetryStrategy.totalCallsToRetryStrategy());
     }
 
     @Test
-    void testMultipleBatches() throws IOException {
-        // First batch
-        executor.onEntryWritten();
-        executor.onEntryWritten();
-        executor.onBatchComplete();
-
-        assertEquals(1, retryStrategy.callCount());
-
-        // Second batch
-        executor.onEntryWritten();
-        executor.onBatchComplete();
-
-        assertEquals(2, retryStrategy.callCount(),
-                "Two onBatchComplete() calls should trigger fsync twice");
-    }
-
-    @Test
-    void testOnBatchCompleteMultipleTimes() throws IOException {
-        executor.onBatchComplete();
-        executor.onBatchComplete();
-        executor.onBatchComplete();
-
-        assertEquals(3, retryStrategy.callCount(),
-                "Three onBatchComplete() calls should trigger fsync three times");
-    }
-
-    @Test
-    void testEmptyBatchCompleteFsyncs() throws IOException {
-        // Calling batch complete without any entries should still fsync
-        executor.onBatchComplete();
-
-        assertEquals(1, retryStrategy.callCount(),
-                "onBatchComplete() should fsync even with empty batch");
-    }
-
-    @Test
-    void testOnEntryWrittenNeverTriggersRetry() throws IOException {
-        for (int i = 0; i < 100; i++) {
-            executor.onEntryWritten();
+    void multipleEntriesFollowedByBatchCompleteTriggersSingleFsync() throws IOException {
+        for (int entryIndex = 0; entryIndex < 10; entryIndex++) {
+            executorUnderTest.onEntryWritten();
         }
 
-        assertEquals(0, retryStrategy.callCount(),
-                "100 onEntryWritten() calls should never trigger fsync");
+        assertEquals(NO_FSYNC_CALLS, testingRetryStrategy.totalCallsToRetryStrategy());
+
+        executorUnderTest.onBatchComplete();
+
+        assertEquals(SINGLE_BATCH_FSYNC, testingRetryStrategy.totalCallsToRetryStrategy());
     }
 
     @Test
-    void testBatchCompleteThrowsOnRetryFailure() throws IOException {
-        retryStrategy.setThrowException(true);
+    void multipleBatchCompleteCallsEachTriggerFsync() throws IOException {
+        executorUnderTest.onBatchComplete();
+        executorUnderTest.onBatchComplete();
+        executorUnderTest.onBatchComplete();
 
-        assertThrows(IOException.class, () -> executor.onBatchComplete(),
-                "Should propagate IOException from retry strategy");
+        assertEquals(THREE_BATCH_FSYNCS, testingRetryStrategy.totalCallsToRetryStrategy());
     }
 
-    // ============================================================================
-    // HELPER: Tracking FsyncRetryStrategy (replaces mocks)
-    // ============================================================================
+    @Test
+    void alternatingEntriesAndBatchesCompleteCorrectly() throws IOException {
+        executorUnderTest.onEntryWritten();
+        executorUnderTest.onBatchComplete();
 
-    static class TrackingFsyncRetryStrategy implements FsyncRetryStrategy {
-        private int callCount = 0;
-        private boolean throwException = false;
+        assertEquals(SINGLE_BATCH_FSYNC, testingRetryStrategy.totalCallsToRetryStrategy());
+
+        executorUnderTest.onEntryWritten();
+        executorUnderTest.onEntryWritten();
+        executorUnderTest.onBatchComplete();
+
+        assertEquals(TWO_BATCH_FSYNCS, testingRetryStrategy.totalCallsToRetryStrategy());
+    }
+
+    @Test
+    void batchCompleteWithoutEntriesStillFsyncs() throws IOException {
+        executorUnderTest.onBatchComplete();
+
+        assertEquals(SINGLE_BATCH_FSYNC, testingRetryStrategy.totalCallsToRetryStrategy());
+    }
+
+    @Test
+    void fsyncFailureFromRetryStrategyPropagatesAsIOException() throws IOException {
+        testingRetryStrategy.configureToThrowOnNextCall(true);
+
+        assertThrows(IOException.class, () -> executorUnderTest.onBatchComplete());
+    }
+
+    @Test
+    void tenConsecutiveEntriesInFiveBatchesTriggerFiveFsyncs() throws IOException {
+        for (int batchIndex = 0; batchIndex < 5; batchIndex++) {
+            for (int entryIndex = 0; entryIndex < 2; entryIndex++) {
+                executorUnderTest.onEntryWritten();
+            }
+            executorUnderTest.onBatchComplete();
+        }
+
+        assertEquals(FIVE_BATCH_FSYNCS, testingRetryStrategy.totalCallsToRetryStrategy());
+    }
+
+    @Test
+    void batchFsyncOptimizationReducesFsyncCallsComparedToEveryEntry() throws IOException {
+        for (int entryIndex = 0; entryIndex < 100; entryIndex++) {
+            executorUnderTest.onEntryWritten();
+        }
+
+        assertEquals(NO_FSYNC_CALLS, testingRetryStrategy.totalCallsToRetryStrategy());
+
+        executorUnderTest.onBatchComplete();
+
+        assertEquals(SINGLE_BATCH_FSYNC, testingRetryStrategy.totalCallsToRetryStrategy());
+    }
+
+    @Test
+    void entryWriteThenMultipleBatchCompletesCalls() throws IOException {
+        executorUnderTest.onEntryWritten();
+        executorUnderTest.onBatchComplete();
+        executorUnderTest.onBatchComplete();
+
+        assertEquals(TWO_BATCH_FSYNCS, testingRetryStrategy.totalCallsToRetryStrategy());
+    }
+
+    static class TrackingFsyncRetryStrategyForTesting implements FsyncRetryStrategy {
+        private int totalRetryStrategyCalls = 0;
+        private int totalFsyncFailureCount = 0;
+        private boolean shouldThrowOnNextCall = false;
 
         @Override
         public void executeWithRetry(FsyncOperation operation) throws IOException {
-            callCount++;
+            totalRetryStrategyCalls++;
 
-            if (throwException) {
+            if (shouldThrowOnNextCall) {
+                totalFsyncFailureCount++;
                 throw new IOException("Test fsync failure");
             }
 
-            // Actually execute the operation to make it realistic
             operation.fsync();
         }
 
-        public int callCount() {
-            return callCount;
+        public int totalCallsToRetryStrategy() {
+            return totalRetryStrategyCalls;
         }
 
-        public void setThrowException(boolean throwException) {
-            this.throwException = throwException;
+        public int totalFsyncFailures() {
+            return totalFsyncFailureCount;
+        }
+
+        public void configureToThrowOnNextCall(boolean shouldThrow) {
+            this.shouldThrowOnNextCall = shouldThrow;
         }
     }
 }

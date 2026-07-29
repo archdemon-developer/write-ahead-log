@@ -5,130 +5,150 @@ import static org.junit.jupiter.api.Assertions.*;
 import io.writeahead.log.exceptions.CorruptionException;
 import io.writeahead.log.exceptions.CorruptionType;
 import io.writeahead.log.models.LogEntry;
+import io.writeahead.log.serdes.EntrySerdes;
+import io.writeahead.log.utils.Crc32Utils;
 import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
-
-import io.writeahead.log.serdes.EntrySerdes;
-import io.writeahead.log.utils.Crc32Utils;
 import org.junit.jupiter.api.Test;
 
 public class SegmentEntriesReaderTest {
 
-    private final SegmentEntriesReader reader = new SegmentEntriesReader();
+    private static final long FIRST_ENTRY_TIMESTAMP = 1000L;
+    private static final long SECOND_ENTRY_TIMESTAMP = 2000L;
+    private static final long THIRD_ENTRY_TIMESTAMP = 3000L;
+    private static final String FIRST_ENTRY_PAYLOAD = "e1";
+    private static final String SECOND_ENTRY_PAYLOAD = "e2";
+    private static final String THIRD_ENTRY_PAYLOAD = "e3";
+    private static final String HELLO_PAYLOAD = "hello";
+    private static final int SMALL_PAYLOAD_SIZE = 2;
+    private static final int HELLO_PAYLOAD_SIZE = 5;
+    private static final int LARGE_PAYLOAD_SIZE = 1024 * 100;
+    private static final int EXPECTED_SINGLE_ENTRY = 1;
+    private static final int EXPECTED_THREE_ENTRIES = 3;
+    private static final int ZERO_ENTRIES = 0;
+
+    private final SegmentEntriesReader entriesReader = new SegmentEntriesReader();
 
     @Test
-    void testReadSingleEntry() throws IOException {
-        byte[] entryRegion = createEntryRegion(
-                new LogEntry(5, "hello".getBytes(), 1000L));
+    void readSingleEntryFromRegion() throws IOException {
+        byte[] serializedRegion = createSerializedEntryRegion(
+                new LogEntry(HELLO_PAYLOAD_SIZE, HELLO_PAYLOAD.getBytes(), FIRST_ENTRY_TIMESTAMP)
+        );
 
-        SegmentEntriesReader.SegmentReadResult result = reader.readEntriesFromRegion(entryRegion);
+        SegmentEntriesReader.SegmentReadResult readResult = entriesReader.readEntriesFromRegion(serializedRegion);
 
-        assertEquals(1, result.entriesRead(), "Should read 1 entry");
-        assertEquals(1, result.entries().size(), "Should have 1 entry");
-        assertFalse(result.hasCorruption(), "Should be valid");
-        assertEquals(1000L, result.entries().getFirst().timestamp(), "Timestamp should match");
+        assertEquals(EXPECTED_SINGLE_ENTRY, readResult.entriesRead());
+        assertEquals(EXPECTED_SINGLE_ENTRY, readResult.entries().size());
+        assertFalse(readResult.hasCorruption());
+        assertEquals(FIRST_ENTRY_TIMESTAMP, readResult.entries().getFirst().timestamp());
     }
 
     @Test
-    void testReadMultipleEntries() throws IOException {
-        byte[] entryRegion = createEntryRegion(
-                new LogEntry(2, "e1".getBytes(), 1000L),
-                new LogEntry(2, "e2".getBytes(), 2000L),
-                new LogEntry(2, "e3".getBytes(), 3000L));
+    void readMultipleEntriesFromRegion() throws IOException {
+        byte[] serializedRegion = createSerializedEntryRegion(
+                new LogEntry(SMALL_PAYLOAD_SIZE, FIRST_ENTRY_PAYLOAD.getBytes(), FIRST_ENTRY_TIMESTAMP),
+                new LogEntry(SMALL_PAYLOAD_SIZE, SECOND_ENTRY_PAYLOAD.getBytes(), SECOND_ENTRY_TIMESTAMP),
+                new LogEntry(SMALL_PAYLOAD_SIZE, THIRD_ENTRY_PAYLOAD.getBytes(), THIRD_ENTRY_TIMESTAMP)
+        );
 
-        SegmentEntriesReader.SegmentReadResult result = reader.readEntriesFromRegion(entryRegion);
+        SegmentEntriesReader.SegmentReadResult readResult = entriesReader.readEntriesFromRegion(serializedRegion);
 
-        assertEquals(3, result.entriesRead(), "Should read 3 entries");
-        assertEquals(3, result.entries().size(), "Should have 3 entries");
-        assertFalse(result.hasCorruption(), "Should be valid");
+        assertEquals(EXPECTED_THREE_ENTRIES, readResult.entriesRead());
+        assertEquals(EXPECTED_THREE_ENTRIES, readResult.entries().size());
+        assertFalse(readResult.hasCorruption());
     }
 
     @Test
-    void testCorruptedEntryCrc() throws IOException {
-        byte[] entryRegion = createEntryRegion(
-                new LogEntry(5, "hello".getBytes(), 1000L));
+    void corruptedEntryCrcThrowsCorruptionException() throws IOException {
+        byte[] serializedRegion = createSerializedEntryRegion(
+                new LogEntry(HELLO_PAYLOAD_SIZE, HELLO_PAYLOAD.getBytes(), FIRST_ENTRY_TIMESTAMP)
+        );
 
-        // Corrupt the CRC (last 8 bytes)
-        entryRegion[entryRegion.length - 1] = (byte) ~entryRegion[entryRegion.length - 1];
+        serializedRegion[serializedRegion.length - 1] = (byte) ~serializedRegion[serializedRegion.length - 1];
 
-        CorruptionException ex = assertThrows(CorruptionException.class,
-                () -> reader.readEntriesFromRegion(entryRegion));
+        CorruptionException caughtException = assertThrows(
+                CorruptionException.class,
+                () -> entriesReader.readEntriesFromRegion(serializedRegion)
+        );
 
-        assertEquals(CorruptionType.ENTRY_CRC_MISMATCH, ex.corruptionType());
-        assertTrue(ex.getMessage().contains("Entry CRC mismatch"));
+        assertEquals(CorruptionType.ENTRY_CRC_MISMATCH, caughtException.corruptionType());
+        assertTrue(caughtException.getMessage().contains("Entry CRC mismatch"));
     }
 
     @Test
-    void testCorruptionStopsReading() throws IOException {
-        byte[] entryRegion = createEntryRegion(
-                new LogEntry(2, "e1".getBytes(), 1000L),
-                new LogEntry(2, "e2".getBytes(), 2000L),
-                new LogEntry(2, "e3".getBytes(), 3000L));
+    void corruptionInMiddleEntryStopsReading() throws IOException {
+        byte[] serializedRegion = createSerializedEntryRegion(
+                new LogEntry(SMALL_PAYLOAD_SIZE, FIRST_ENTRY_PAYLOAD.getBytes(), FIRST_ENTRY_TIMESTAMP),
+                new LogEntry(SMALL_PAYLOAD_SIZE, SECOND_ENTRY_PAYLOAD.getBytes(), SECOND_ENTRY_TIMESTAMP),
+                new LogEntry(SMALL_PAYLOAD_SIZE, THIRD_ENTRY_PAYLOAD.getBytes(), THIRD_ENTRY_TIMESTAMP)
+        );
 
-        // Corrupt the second entry's CRC
-        int secondEntryStart = 8 + 4 + 2 + 8;
-        int secondEntryCrcPos = secondEntryStart + 8 + 4 + 2;
-        entryRegion[secondEntryCrcPos + 1] = (byte) ~entryRegion[secondEntryCrcPos + 1];
-        entryRegion[secondEntryCrcPos] = (byte) ~entryRegion[secondEntryCrcPos];
+        int secondEntryStartOffset = 8 + 4 + SMALL_PAYLOAD_SIZE;
+        int secondEntryCrcPositionInBuffer = secondEntryStartOffset + 8 + 4 + SMALL_PAYLOAD_SIZE;
+        serializedRegion[secondEntryCrcPositionInBuffer + 1] = (byte) ~serializedRegion[secondEntryCrcPositionInBuffer + 1];
+        serializedRegion[secondEntryCrcPositionInBuffer] = (byte) ~serializedRegion[secondEntryCrcPositionInBuffer];
 
-        CorruptionException ex = assertThrows(CorruptionException.class,
-                () -> reader.readEntriesFromRegion(entryRegion));
+        CorruptionException caughtException = assertThrows(
+                CorruptionException.class,
+                () -> entriesReader.readEntriesFromRegion(serializedRegion)
+        );
 
-        assertEquals(CorruptionType.ENTRY_CRC_MISMATCH, ex.corruptionType());
-        assertTrue(ex.getMessage().contains("entry 1"));
+        assertEquals(CorruptionType.ENTRY_CRC_MISMATCH, caughtException.corruptionType());
+        assertTrue(caughtException.getMessage().contains("entry 1"));
     }
 
     @Test
-    void testEmptyEntryRegion() throws IOException {
-        byte[] entryRegion = new byte[0];
+    void emptyEntryRegionReturnsEmptyList() throws IOException {
+        byte[] emptyRegion = new byte[0];
 
-        SegmentEntriesReader.SegmentReadResult result = reader.readEntriesFromRegion(entryRegion);
+        SegmentEntriesReader.SegmentReadResult readResult = entriesReader.readEntriesFromRegion(emptyRegion);
 
-        assertEquals(0, result.entries().size(), "Should return empty list");
-        assertFalse(result.hasCorruption(), "Empty is not corruption");
+        assertEquals(ZERO_ENTRIES, readResult.entries().size());
+        assertFalse(readResult.hasCorruption());
     }
 
     @Test
-    void testLargeEntry() throws IOException {
-        byte[] largeData = new byte[1024 * 100];
-        for (int i = 0; i < largeData.length; i++) {
-            largeData[i] = (byte) (i % 256);
+    void largeEntryIsReadCorrectly() throws IOException {
+        byte[] largePayloadData = new byte[LARGE_PAYLOAD_SIZE];
+        for (int index = 0; index < largePayloadData.length; index++) {
+            largePayloadData[index] = (byte) (index % 256);
         }
 
-        byte[] entryRegion = createEntryRegion(
-                new LogEntry(largeData.length, largeData, 1000L));
+        byte[] serializedRegion = createSerializedEntryRegion(
+                new LogEntry(LARGE_PAYLOAD_SIZE, largePayloadData, FIRST_ENTRY_TIMESTAMP)
+        );
 
-        SegmentEntriesReader.SegmentReadResult result = reader.readEntriesFromRegion(entryRegion);
+        SegmentEntriesReader.SegmentReadResult readResult = entriesReader.readEntriesFromRegion(serializedRegion);
 
-        assertEquals(1, result.entries().size(), "Should read large entry");
-        assertEquals(largeData.length, result.entries().getFirst().size(), "Size should match");
-        assertFalse(result.hasCorruption(), "Should be valid");
+        assertEquals(EXPECTED_SINGLE_ENTRY, readResult.entries().size());
+        assertEquals(LARGE_PAYLOAD_SIZE, readResult.entries().getFirst().size());
+        assertFalse(readResult.hasCorruption());
     }
 
-    // Helper: Create entry region from list of entries
-    private byte[] createEntryRegion(LogEntry... entries) throws IOException {
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        DataOutputStream dos = new DataOutputStream(baos);
+    private byte[] createSerializedEntryRegion(LogEntry... entriesToSerialize) throws IOException {
+        ByteArrayOutputStream byteArrayBuffer = new ByteArrayOutputStream();
+        DataOutputStream dataStreamWriter = new DataOutputStream(byteArrayBuffer);
 
-        for (LogEntry entry : entries) {
-            long crc = Crc32Utils.computeEntryCrc(entry.timestamp(), entry.size(), entry.data());
+        for (LogEntry entry : entriesToSerialize) {
+            long entryCrc = Crc32Utils.computeEntryCrc(entry.timestamp(), entry.size(), entry.data());
 
-            byte[] entryWithCrc = EntrySerdes.serializeEntryWithCrc(
+            byte[] serializedEntryWithCrc = EntrySerdes.serializeEntryWithCrc(
                     entry.timestamp(),
                     entry.size(),
                     entry.data(),
-                    crc);
+                    entryCrc
+            );
 
-            dos.write(entryWithCrc);
+            dataStreamWriter.write(serializedEntryWithCrc);
         }
 
-        dos.flush();  // ← FLUSH FIRST
-        byte[] result = baos.toByteArray();
+        dataStreamWriter.flush();
+        byte[] serializedEntryRegionBytes = byteArrayBuffer.toByteArray();
 
-        dos.close();
-        baos.close();
+        dataStreamWriter.close();
+        byteArrayBuffer.close();
 
-        return result;
+        return serializedEntryRegionBytes;
     }
 }

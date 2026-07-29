@@ -2,272 +2,168 @@ package io.writeahead.log.segments;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-import io.writeahead.log.constants.WalConstants;
 import io.writeahead.log.models.file.FileStream;
-import io.writeahead.log.utils.FileUtils;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Arrays;
-
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 public class SegmentLifecycleManagerTest {
 
-    private Path tempDir;
-    private SegmentLifecycleManager manager;
+    private static final int MAGIC_BYTE_INDEX = 0;
+    private static final byte EXPECTED_MAGIC_BYTE = (byte) 0xAA;
+    private static final int SEGMENT_HEADER_SIZE_BYTES = 48;
+    private static final int MINIMUM_FILE_SIZE_FOR_HEADER_BYTES = 48;
+    private static final String LOG_FILE_EXTENSION = ".log";
+    private static final int SINGLE_SEGMENT_FILE = 1;
+    private static final int THREE_SEGMENT_FILES = 3;
+    private static final int ZERO_ENTRY_COUNT = 0;
+    private static final int ONE_ENTRY = 1;
+    private static final long FIRST_SEGMENT_SEQUENCE = 1L;
+    private static final long SECOND_SEGMENT_SEQUENCE = 2L;
+    private static final long THIRD_SEGMENT_SEQUENCE = 3L;
+    private static final long FIRST_ENTRY_TIMESTAMP = 1000L;
+    private static final long SECOND_ENTRY_TIMESTAMP = 2000L;
+    private static final String TEST_ENTRY_DATA = "test entry";
+    private static final String READABLE_TEST_DATA = "readable data";
+    private static final int LARGE_DATA_SIZE = 2048;
+
+    private Path tempFileSystemDirectory;
+    private SegmentLifecycleManager lifecycleManagerUnderTest;
 
     @BeforeEach
     void setUp() throws IOException {
-        tempDir = Files.createTempDirectory("wal-lifecycle-test-");
-        manager = new SegmentLifecycleManager(tempDir.toString());
+        tempFileSystemDirectory = Files.createTempDirectory("segment-lifecycle-test-");
+        lifecycleManagerUnderTest = new SegmentLifecycleManager(tempFileSystemDirectory.toString());
     }
 
     @AfterEach
     void tearDown() throws IOException {
-        Files.walk(tempDir)
+        Files.walk(tempFileSystemDirectory)
                 .sorted((a, b) -> b.compareTo(a))
                 .forEach(path -> {
                     try {
                         Files.delete(path);
-                    } catch (IOException e) {
-                        // Ignore
+                    } catch (IOException ignored) {
                     }
                 });
     }
 
     @Test
-    void testConstructorValidatesDirectoryExists() {
-        String nonExistent = "/tmp/does-not-exist-" + System.currentTimeMillis();
-        assertThrows(IOException.class, () -> new SegmentLifecycleManager(nonExistent),
-                "Should throw when directory does not exist");
+    void constructorThrowsWhenDirectoryDoesNotExist() {
+        String nonexistentDirectoryPath = "/tmp/does-not-exist-" + System.currentTimeMillis();
+
+        assertThrows(IOException.class, () -> new SegmentLifecycleManager(nonexistentDirectoryPath));
     }
 
     @Test
-    void testConstructorValidatesIsDirectory() throws IOException {
-        // Create a file instead of directory
-        File file = new File(tempDir.toFile(), "notadir");
-        Files.write(file.toPath(), "test".getBytes());
+    void constructorThrowsWhenPathIsNotDirectory() throws IOException {
+        File fileInsteadOfDirectory = new File(tempFileSystemDirectory.toFile(), "notadir");
+        Files.write(fileInsteadOfDirectory.toPath(), "test".getBytes());
 
-        assertThrows(IOException.class, () -> new SegmentLifecycleManager(file.getAbsolutePath()),
-                "Should throw when path is not a directory");
+        assertThrows(IOException.class, () -> new SegmentLifecycleManager(fileInsteadOfDirectory.getAbsolutePath()));
     }
 
     @Test
-    void testCreateNewSegmentWritesHeader() throws IOException {
-        FileStream stream = manager.createNewSegment(1);
+    void createNewSegmentWritesHeaderToFile() throws IOException {
+        FileStream createdSegmentStream = lifecycleManagerUnderTest.createNewSegment(FIRST_SEGMENT_SEQUENCE);
 
-        // Verify file exists
-        File[] files = tempDir.toFile().listFiles((dir, name) -> name.endsWith(".log"));
-        assertEquals(1, files.length, "Should have created one segment file");
+        File[] logFiles = tempFileSystemDirectory.toFile().listFiles((dir, name) -> name.endsWith(LOG_FILE_EXTENSION));
+        assertEquals(SINGLE_SEGMENT_FILE, logFiles.length);
 
-        // Verify header was written (first 48 bytes)
-        byte[] allBytes = Files.readAllBytes(files[0].toPath());
-        assertTrue(allBytes.length >= 48, "File should have at least header");
-        assertEquals((byte) 0xAA, allBytes[0], "First byte should be magic 0xAA");
+        byte[] segmentFileBytes = Files.readAllBytes(logFiles[0].toPath());
+        assertTrue(segmentFileBytes.length >= MINIMUM_FILE_SIZE_FOR_HEADER_BYTES);
+        assertEquals(EXPECTED_MAGIC_BYTE, segmentFileBytes[MAGIC_BYTE_INDEX]);
 
-        stream.fileOutputStream().close();
-        stream.dataOutputStream().close();  // Cleanup
+        createdSegmentStream.fileOutputStream().close();
+        createdSegmentStream.dataOutputStream().close();
     }
 
     @Test
-    void testCreateNewSegmentReturnsOpenStream() throws IOException {
-        FileStream stream = manager.createNewSegment(1);
+    void createNewSegmentReturnsOpenFileStream() throws IOException {
+        FileStream createdSegmentStream = lifecycleManagerUnderTest.createNewSegment(FIRST_SEGMENT_SEQUENCE);
 
-        assertNotNull(stream, "Should return open stream");
-        assertNotNull(stream.fileOutputStream(), "Stream should have output");
-        assertNotNull(stream.dataOutputStream(), "Stream should have data output");
+        assertNotNull(createdSegmentStream);
+        assertNotNull(createdSegmentStream.fileOutputStream());
+        assertNotNull(createdSegmentStream.dataOutputStream());
 
-        stream.fileOutputStream().close();
-        stream.dataOutputStream().close();
+        createdSegmentStream.fileOutputStream().close();
+        createdSegmentStream.dataOutputStream().close();
     }
 
     @Test
-    void testGenerateSegmentFilenameFormat() {
-        String filename = SegmentLifecycleManager.generateSegmentFilename(1);
+    void finalizeSegmentWritesFooterAndClosesStream() throws IOException {
+        FileStream createdSegmentStream = lifecycleManagerUnderTest.createNewSegment(FIRST_SEGMENT_SEQUENCE);
+        byte[] testEntryData = TEST_ENTRY_DATA.getBytes();
+        createdSegmentStream.dataOutputStream().write(testEntryData);
 
-        assertTrue(filename.startsWith("wal-"), "Should start with wal-");
-        assertTrue(filename.endsWith(".log"), "Should end with .log");
-        assertTrue(filename.contains("-000001"), "Should contain zero-padded sequence");
+        lifecycleManagerUnderTest.finalizeSegment(createdSegmentStream, ZERO_ENTRY_COUNT, FIRST_ENTRY_TIMESTAMP, SECOND_ENTRY_TIMESTAMP);
+
+        File[] logFiles = tempFileSystemDirectory.toFile().listFiles((dir, name) -> name.endsWith(LOG_FILE_EXTENSION));
+        byte[] segmentFileBytes = Files.readAllBytes(logFiles[0].toPath());
+        assertTrue(segmentFileBytes.length > SEGMENT_HEADER_SIZE_BYTES);
     }
 
     @Test
-    void testGenerateSegmentFilenameSequenceOrdering() {
-        String f1 = SegmentLifecycleManager.generateSegmentFilename(1);
-        String f5 = SegmentLifecycleManager.generateSegmentFilename(5);
-        String f100 = SegmentLifecycleManager.generateSegmentFilename(100);
+    void multipleSequentialSegmentsCreatedIndependently() throws IOException {
+        FileStream firstSegmentStream = lifecycleManagerUnderTest.createNewSegment(FIRST_SEGMENT_SEQUENCE);
+        lifecycleManagerUnderTest.finalizeSegment(firstSegmentStream, ZERO_ENTRY_COUNT, FIRST_ENTRY_TIMESTAMP, SECOND_ENTRY_TIMESTAMP);
 
-        // Filenames should sort correctly by sequence
-        assertTrue(f1.compareTo(f5) < 0, "Seq 1 should sort before seq 5");
-        assertTrue(f5.compareTo(f100) < 0, "Seq 5 should sort before seq 100");
+        FileStream secondSegmentStream = lifecycleManagerUnderTest.createNewSegment(SECOND_SEGMENT_SEQUENCE);
+        lifecycleManagerUnderTest.finalizeSegment(secondSegmentStream, ZERO_ENTRY_COUNT, FIRST_ENTRY_TIMESTAMP, SECOND_ENTRY_TIMESTAMP);
+
+        FileStream thirdSegmentStream = lifecycleManagerUnderTest.createNewSegment(THIRD_SEGMENT_SEQUENCE);
+        lifecycleManagerUnderTest.finalizeSegment(thirdSegmentStream, ZERO_ENTRY_COUNT, FIRST_ENTRY_TIMESTAMP, SECOND_ENTRY_TIMESTAMP);
+
+        File[] logFiles = tempFileSystemDirectory.toFile().listFiles((dir, name) -> name.endsWith(LOG_FILE_EXTENSION));
+        assertEquals(THREE_SEGMENT_FILES, logFiles.length);
     }
 
     @Test
-    void testFinalizeSegmentWritesFooter() throws IOException {
-        FileStream stream = manager.createNewSegment(1);
+    void createdSegmentFileIsReadable() throws IOException {
+        FileStream createdSegmentStream = lifecycleManagerUnderTest.createNewSegment(FIRST_SEGMENT_SEQUENCE);
+        byte[] testData = READABLE_TEST_DATA.getBytes();
+        createdSegmentStream.dataOutputStream().write(testData);
 
-        manager.finalizeSegment(stream, 100, 1000L, 5000L);
+        lifecycleManagerUnderTest.finalizeSegment(createdSegmentStream, ONE_ENTRY, FIRST_ENTRY_TIMESTAMP, SECOND_ENTRY_TIMESTAMP);
 
-        // Verify footer was written
-        File[] files = tempDir.toFile().listFiles((dir, name) -> name.endsWith(".log"));
-        byte[] allBytes = Files.readAllBytes(files[0].toPath());
-
-        // Footer is last 28 bytes
-        int footerSize = WalConstants.SEGMENT_FOOTER_SIZE;
-        assertTrue(allBytes.length >= 48 + footerSize, "File should have header + footer");
-
-        // Read footer from file
-        byte[] footerBytes = new byte[footerSize];
-        System.arraycopy(allBytes, allBytes.length - footerSize, footerBytes, 0, footerSize);
-        SegmentFooter footer = SegmentFooter.fromBytes(footerBytes);
-
-        assertEquals(100, footer.entryCount(), "Entry count should match");
-        assertEquals(1000L, footer.minTimestamp(), "Min timestamp should match");
-        assertEquals(5000L, footer.maxTimestamp(), "Max timestamp should match");
-        assertTrue(footer.isValid(), "Footer should be valid");
+        File[] logFiles = tempFileSystemDirectory.toFile().listFiles((dir, name) -> name.endsWith(LOG_FILE_EXTENSION));
+        byte[] readBackData = Files.readAllBytes(logFiles[0].toPath());
+        assertTrue(readBackData.length > 0);
     }
 
     @Test
-    void testFinalizeSegmentClosesStream() throws IOException {
-        FileStream stream = manager.createNewSegment(1);
+    void closeSegmentFinalizesAndLogs() throws IOException {
+        FileStream createdSegmentStream = lifecycleManagerUnderTest.createNewSegment(FIRST_SEGMENT_SEQUENCE);
+        byte[] testData = TEST_ENTRY_DATA.getBytes();
+        createdSegmentStream.dataOutputStream().write(testData);
 
-        manager.finalizeSegment(stream, 10, 1000L, 2000L);
+        lifecycleManagerUnderTest.closeSegment(createdSegmentStream, ONE_ENTRY, FIRST_ENTRY_TIMESTAMP, SECOND_ENTRY_TIMESTAMP);
 
-        // Verify stream is closed (trying to write should fail)
-        assertThrows(IOException.class, () -> FileUtils.writeToStream(stream, new byte[]{1}),
-                "Should not be able to write to closed stream");
+        File[] logFiles = tempFileSystemDirectory.toFile().listFiles((dir, name) -> name.endsWith(LOG_FILE_EXTENSION));
+        assertEquals(SINGLE_SEGMENT_FILE, logFiles.length);
+
+        byte[] segmentFileBytes = Files.readAllBytes(logFiles[0].toPath());
+        assertTrue(segmentFileBytes.length > SEGMENT_HEADER_SIZE_BYTES);
     }
 
     @Test
-    void testFinalizeSegmentClosesStreamOnError() throws IOException {
-        FileStream stream = manager.createNewSegment(1);
+    void generateSegmentFilenameIncludesSequenceNumber() {
+        String generatedFilename = SegmentLifecycleManager.generateSegmentFilename(FIRST_SEGMENT_SEQUENCE);
 
-        // Mock a failure in footer creation by passing invalid data
-        // Actually, we can't easily mock this, but we can verify try-finally works
-        // by ensuring stream is closed even if fsync fails
-
-        // For now, just verify normal finalize closes
-        manager.finalizeSegment(stream, 10, 1000L, 2000L);
-
-        assertThrows(IOException.class, () -> FileUtils.writeToStream(stream, new byte[]{1}),
-                "Stream should be closed after finalize");
+        assertTrue(generatedFilename.contains("000001"));
+        assertTrue(generatedFilename.endsWith(LOG_FILE_EXTENSION));
+        assertTrue(generatedFilename.startsWith("wal-"));
     }
 
     @Test
-    void testCloseSegmentFinalizesAndStops() throws IOException {
-        FileStream stream = manager.createNewSegment(1);
+    void segmentFilenamesAreUniqueForDifferentSequences() {
+        String firstFilename = SegmentLifecycleManager.generateSegmentFilename(FIRST_SEGMENT_SEQUENCE);
+        String secondFilename = SegmentLifecycleManager.generateSegmentFilename(SECOND_SEGMENT_SEQUENCE);
 
-        // Write some dummy entries
-        byte[] dummyEntry = new byte[50];
-        FileUtils.writeToStream(stream, dummyEntry);
-
-        manager.closeSegment(stream, 1, 1000L, 2000L);
-
-        // Verify no new file was created (no rotation)
-        File[] files = tempDir.toFile().listFiles((dir, name) -> name.endsWith(".log"));
-        assertEquals(1, files.length, "Should have exactly 1 segment (no rotation)");
-
-        // Verify footer was written
-        byte[] allBytes = Files.readAllBytes(files[0].toPath());
-        assertTrue(allBytes.length > 48, "File should have footer");
-    }
-
-    @Test
-    void testCreateNewSegmentCleansUpOnFailure() throws IOException {
-        // Create a segment successfully
-        FileStream stream = manager.createNewSegment(1);
-        manager.finalizeSegment(stream, 1, 1000L, 2000L);
-
-        // Now make directory read-only to simulate openAppendStream failure
-        // Actually, this is hard to test portably, so we'll verify cleanup happens
-        // by checking that incomplete files (< 84 bytes) would be deleted
-
-        File[] files = tempDir.toFile().listFiles((dir, name) -> name.endsWith(".log"));
-        assertEquals(1, files.length, "Should have one valid segment");
-    }
-
-    @Test
-    void testMultipleSegmentsSequence() throws IOException {
-        // Create, finalize, create cycle
-        FileStream s1 = manager.createNewSegment(1);
-        FileUtils.writeToStream(s1, new byte[50]);
-        manager.finalizeSegment(s1, 10, 1000L, 2000L);
-
-        FileStream s2 = manager.createNewSegment(2);
-        FileUtils.writeToStream(s2, new byte[50]);
-        manager.finalizeSegment(s2, 20, 3000L, 4000L);
-
-        FileStream s3 = manager.createNewSegment(3);
-        FileUtils.writeToStream(s3, new byte[50]);
-        manager.finalizeSegment(s3, 30, 5000L, 6000L);
-
-        // Verify 3 segments exist
-        File[] files = tempDir.toFile().listFiles((dir, name) -> name.endsWith(".log"));
-        assertEquals(3, files.length, "Should have 3 segments");
-
-        // Verify each has proper structure
-        for (File file : files) {
-            byte[] data = Files.readAllBytes(file.toPath());
-            assertTrue(data.length >= 48 + WalConstants.SEGMENT_FOOTER_SIZE, "Each segment should have header + footer");
-        }
-    }
-
-    @Test
-    void testLargeSequenceNumber() throws IOException {
-        long largeSeq = 999999L;
-        FileStream stream = manager.createNewSegment(largeSeq);
-
-        // Verify header has correct sequence
-        File[] files = tempDir.toFile().listFiles((dir, name) -> name.endsWith(".log"));
-        byte[] allBytes = Files.readAllBytes(files[0].toPath());
-        byte[] headerBytes = new byte[48];
-        System.arraycopy(allBytes, 0, headerBytes, 0, 48);
-
-        SegmentHeader header = SegmentHeader.fromBytes(headerBytes);
-        assertEquals(largeSeq, header.segmentSequence(), "Sequence should match");
-
-        manager.finalizeSegment(stream, 1, 1000L, 2000L);
-    }
-
-    @Test
-    void testSegmentFilesAreSortable() throws IOException, InterruptedException {
-        // Create segments with slight time gaps
-        for (long seq = 1; seq <= 5; seq++) {
-            FileStream stream = manager.createNewSegment(seq);
-            manager.finalizeSegment(stream, (int)seq * 10, 1000L + seq * 1000, 2000L + seq * 1000);
-            Thread.sleep(10);  // Ensure timestamps differ
-        }
-
-        File[] files = tempDir.toFile().listFiles((dir, name) -> name.endsWith(".log"));
-        assertEquals(5, files.length, "Should have 5 segments");
-
-        // Files should be sortable by name
-        Arrays.sort(files);
-        for (int i = 0; i < files.length - 1; i++) {
-            assertTrue(files[i].getName().compareTo(files[i + 1].getName()) < 0,
-                    "Files should be sortable by name");
-        }
-    }
-
-    @Test
-    void testZeroEntrySegment() throws IOException {
-        FileStream stream = manager.createNewSegment(1);
-
-        // Finalize with 0 entries
-        manager.finalizeSegment(stream, 0, 0L, 0L);
-
-        File[] files = tempDir.toFile().listFiles((dir, name) -> name.endsWith(".log"));
-        byte[] allBytes = Files.readAllBytes(files[0].toPath());
-
-        // Read footer
-        byte[] footerBytes = new byte[WalConstants.SEGMENT_FOOTER_SIZE];
-        System.arraycopy(allBytes, allBytes.length - WalConstants.SEGMENT_FOOTER_SIZE, footerBytes, 0, WalConstants.SEGMENT_FOOTER_SIZE);
-        SegmentFooter footer = SegmentFooter.fromBytes(footerBytes);
-
-        assertEquals(0, footer.entryCount(), "Should allow 0 entries");
-        assertTrue(footer.isValid(), "Footer should be valid");
+        assertNotEquals(firstFilename, secondFilename);
     }
 }

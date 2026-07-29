@@ -12,47 +12,45 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-/**
- * MILITARY-GRADE TEST SUITE FOR EVERYENTRYFSYNCEXECUTOR
- *
- * <p>Tests that fsync is called exactly when entries are written.
- * - onEntryWritten() SHOULD fsync immediately
- * - onBatchComplete() should NOT fsync
- * - Retry strategy is invoked per entry
- */
 public class EveryEntryFsyncExecutorTest {
 
-    private Path tempDir;
-    private Path tempFile;
-    private FileStream fileStream;
-    private TrackingFsyncRetryStrategy retryStrategy;
-    private EveryEntryFsyncExecutor executor;
+    private static final int SINGLE_FSYNC_CALL = 1;
+    private static final int ZERO_FSYNC_CALLS = 0;
+    private static final int THREE_FSYNC_CALLS = 3;
+    private static final int TEN_FSYNC_CALLS = 10;
+    private static final int FIVE_FSYNC_CALLS = 5;
+
+    private Path tempFileSystemDirectory;
+    private Path tempLogFile;
+    private FileStream fileStreamForLogFile;
+    private TrackingFsyncRetryStrategyForTesting testingRetryStrategy;
+    private EveryEntryFsyncExecutor executorUnderTest;
 
     @BeforeEach
     void setUp() throws IOException {
-        tempDir = Files.createTempDirectory("fsync-executor-test-");
-        tempFile = tempDir.resolve("test.log");
-        Files.createFile(tempFile);
+        tempFileSystemDirectory = Files.createTempDirectory("fsync-executor-test-");
+        tempLogFile = tempFileSystemDirectory.resolve("test.log");
+        Files.createFile(tempLogFile);
 
-        fileStream = new FileStream(
-                new java.io.FileOutputStream(tempFile.toFile(), true),
-                new java.io.DataOutputStream(new java.io.FileOutputStream(tempFile.toFile(), true))
+        fileStreamForLogFile = new FileStream(
+                new java.io.FileOutputStream(tempLogFile.toFile(), true),
+                new java.io.DataOutputStream(new java.io.FileOutputStream(tempLogFile.toFile(), true))
         );
 
-        retryStrategy = new TrackingFsyncRetryStrategy();
-        executor = new EveryEntryFsyncExecutor(retryStrategy, fileStream);
+        testingRetryStrategy = new TrackingFsyncRetryStrategyForTesting();
+        executorUnderTest = new EveryEntryFsyncExecutor(testingRetryStrategy, fileStreamForLogFile);
     }
 
     @AfterEach
     void tearDown() throws IOException {
-        if (fileStream != null) {
+        if (fileStreamForLogFile != null) {
             try {
-                fileStream.dataOutputStream().close();
+                fileStreamForLogFile.dataOutputStream().close();
             } catch (Exception ignored) {
             }
         }
 
-        Files.walk(tempDir)
+        Files.walk(tempFileSystemDirectory)
                 .sorted((a, b) -> b.compareTo(a))
                 .forEach(
                         path -> {
@@ -64,158 +62,135 @@ public class EveryEntryFsyncExecutorTest {
     }
 
     @Test
-    void testOnEntryWrittenFsyncsImmediately() throws IOException {
-        executor.onEntryWritten();
+    void onEntryWrittenTriggersImmediateFsync() throws IOException {
+        executorUnderTest.onEntryWritten();
 
-        assertEquals(1, retryStrategy.callCount(),
-                "onEntryWritten() should trigger fsync immediately");
+        assertEquals(SINGLE_FSYNC_CALL, testingRetryStrategy.totalCallsToRetryStrategy());
     }
 
     @Test
-    void testOnBatchCompleteDoesNotFsync() throws IOException {
-        executor.onBatchComplete();
+    void onBatchCompleteDoesNotTriggerFsync() throws IOException {
+        executorUnderTest.onBatchComplete();
 
-        assertEquals(0, retryStrategy.callCount(),
-                "onBatchComplete() should NOT trigger fsync");
+        assertEquals(ZERO_FSYNC_CALLS, testingRetryStrategy.totalCallsToRetryStrategy());
     }
 
     @Test
-    void testFsyncCalledPerEntry() throws IOException {
-        executor.onEntryWritten();
-        executor.onEntryWritten();
-        executor.onEntryWritten();
+    void eachEntryWriteTriggersIndependentFsync() throws IOException {
+        executorUnderTest.onEntryWritten();
+        executorUnderTest.onEntryWritten();
+        executorUnderTest.onEntryWritten();
 
-        assertEquals(3, retryStrategy.callCount(),
-                "Each onEntryWritten() should trigger one fsync");
+        assertEquals(THREE_FSYNC_CALLS, testingRetryStrategy.totalCallsToRetryStrategy());
     }
 
     @Test
-    void testMultipleEntriesEachFsyncs() throws IOException {
-        for (int i = 0; i < 10; i++) {
-            executor.onEntryWritten();
+    void tenConsecutiveEntryWritesTriggerTenFsyncs() throws IOException {
+        for (int entryIndex = 0; entryIndex < 10; entryIndex++) {
+            executorUnderTest.onEntryWritten();
         }
 
-        assertEquals(10, retryStrategy.callCount(),
-                "10 entries should trigger 10 fsyncs");
+        assertEquals(TEN_FSYNC_CALLS, testingRetryStrategy.totalCallsToRetryStrategy());
     }
 
     @Test
-    void testBatchCompleteDoesNotAddFsync() throws IOException {
-        executor.onEntryWritten();
-        executor.onEntryWritten();
-        executor.onEntryWritten();
+    void batchCompleteAfterEntriesDoesNotAddAdditionalFsync() throws IOException {
+        executorUnderTest.onEntryWritten();
+        executorUnderTest.onEntryWritten();
+        executorUnderTest.onEntryWritten();
 
-        assertEquals(3, retryStrategy.callCount());
+        assertEquals(THREE_FSYNC_CALLS, testingRetryStrategy.totalCallsToRetryStrategy());
 
-        // Batch complete should NOT add another fsync
-        executor.onBatchComplete();
+        executorUnderTest.onBatchComplete();
 
-        assertEquals(3, retryStrategy.callCount(),
-                "onBatchComplete() should not trigger additional fsync");
+        assertEquals(THREE_FSYNC_CALLS, testingRetryStrategy.totalCallsToRetryStrategy());
     }
 
     @Test
-    void testEntryWrittenThenBatchCompleteThenEntryWritten() throws IOException {
-        executor.onEntryWritten();  // fsync #1
-        executor.onBatchComplete(); // no fsync
-        executor.onEntryWritten();  // fsync #2
+    void entryWriteThenBatchCompleteThenEntryWriteSequence() throws IOException {
+        executorUnderTest.onEntryWritten();
+        executorUnderTest.onBatchComplete();
+        executorUnderTest.onEntryWritten();
 
-        assertEquals(2, retryStrategy.callCount(),
-                "Only entry writes should trigger fsyncs");
+        assertEquals(2, testingRetryStrategy.totalCallsToRetryStrategy());
     }
 
     @Test
-    void testFsyncThrowsOnFailure() throws IOException {
-        retryStrategy.setThrowException(true);
+    void fsyncFailureFromRetryStrategyPropagatesAsIOException() throws IOException {
+        testingRetryStrategy.configureToThrowOnNextCall(true);
 
-        assertThrows(IOException.class, () -> executor.onEntryWritten(),
-                "Should propagate IOException from retry strategy");
+        assertThrows(IOException.class, () -> executorUnderTest.onEntryWritten());
     }
 
     @Test
-    void testFirstEntryFsyncSucceeds() throws IOException {
-        executor.onEntryWritten();
+    void firstEntryWriteFsyncSucceedsWithoutFailures() throws IOException {
+        executorUnderTest.onEntryWritten();
 
-        assertEquals(1, retryStrategy.callCount());
-        assertEquals(0, retryStrategy.failureCount());
+        assertEquals(SINGLE_FSYNC_CALL, testingRetryStrategy.totalCallsToRetryStrategy());
+        assertEquals(0, testingRetryStrategy.totalFsyncFailures());
     }
 
     @Test
-    void testFsyncPerEntryWithoutBatchOptimization() throws IOException {
-        // Simulate every-entry fsync strategy: no batching benefits
-        // Entry 1, fsync
-        executor.onEntryWritten();
-        assertEquals(1, retryStrategy.callCount());
+    void everyEntryStrategyWithoutBatchOptimization() throws IOException {
+        executorUnderTest.onEntryWritten();
+        assertEquals(SINGLE_FSYNC_CALL, testingRetryStrategy.totalCallsToRetryStrategy());
 
-        // Entry 2, fsync
-        executor.onEntryWritten();
-        assertEquals(2, retryStrategy.callCount());
+        executorUnderTest.onEntryWritten();
+        assertEquals(2, testingRetryStrategy.totalCallsToRetryStrategy());
 
-        // Entry 3, fsync
-        executor.onEntryWritten();
-        assertEquals(3, retryStrategy.callCount());
+        executorUnderTest.onEntryWritten();
+        assertEquals(THREE_FSYNC_CALLS, testingRetryStrategy.totalCallsToRetryStrategy());
 
-        // Batch complete, NO fsync (strategy already fsynced each entry)
-        executor.onBatchComplete();
-        assertEquals(3, retryStrategy.callCount());
+        executorUnderTest.onBatchComplete();
+        assertEquals(THREE_FSYNC_CALLS, testingRetryStrategy.totalCallsToRetryStrategy());
     }
 
     @Test
-    void testMaxDurabilityPerEntry() throws IOException {
-        // Every entry write is immediately durable
-        for (int i = 0; i < 5; i++) {
-            executor.onEntryWritten();
+    void maximalDurabilityPerEntryGuarantee() throws IOException {
+        for (int entryIndex = 0; entryIndex < 5; entryIndex++) {
+            executorUnderTest.onEntryWritten();
 
-            // After each entry write, it should be fsynced
-            assertEquals(i + 1, retryStrategy.callCount(),
-                    "Each entry should be fsynced immediately");
+            assertEquals(entryIndex + 1, testingRetryStrategy.totalCallsToRetryStrategy());
         }
     }
 
     @Test
-    void testBatchCompleteMultipleTimes() throws IOException {
-        executor.onEntryWritten();
-        executor.onBatchComplete();
-        executor.onBatchComplete();
-        executor.onBatchComplete();
+    void multipleBatchCompleteCallsWithoutEntryWritesDoNotTriggerFsync() throws IOException {
+        executorUnderTest.onEntryWritten();
+        executorUnderTest.onBatchComplete();
+        executorUnderTest.onBatchComplete();
+        executorUnderTest.onBatchComplete();
 
-        // Only the entry write triggers fsync
-        assertEquals(1, retryStrategy.callCount(),
-                "Multiple batch completes should not trigger fsyncs");
+        assertEquals(SINGLE_FSYNC_CALL, testingRetryStrategy.totalCallsToRetryStrategy());
     }
 
-    // ============================================================================
-    // HELPER: Tracking FsyncRetryStrategy (replaces mocks)
-    // ============================================================================
-
-    static class TrackingFsyncRetryStrategy implements FsyncRetryStrategy {
-        private int callCount = 0;
-        private int failureCount = 0;
-        private boolean throwException = false;
+    static class TrackingFsyncRetryStrategyForTesting implements FsyncRetryStrategy {
+        private int totalRetryStrategyCalls = 0;
+        private int totalFsyncFailureCount = 0;
+        private boolean shouldThrowOnNextCall = false;
 
         @Override
         public void executeWithRetry(FsyncOperation operation) throws IOException {
-            callCount++;
+            totalRetryStrategyCalls++;
 
-            if (throwException) {
-                failureCount++;
+            if (shouldThrowOnNextCall) {
+                totalFsyncFailureCount++;
                 throw new IOException("Test fsync failure");
             }
 
-            // Actually execute the operation to make it realistic
             operation.fsync();
         }
 
-        public int callCount() {
-            return callCount;
+        public int totalCallsToRetryStrategy() {
+            return totalRetryStrategyCalls;
         }
 
-        public int failureCount() {
-            return failureCount;
+        public int totalFsyncFailures() {
+            return totalFsyncFailureCount;
         }
 
-        public void setThrowException(boolean throwException) {
-            this.throwException = throwException;
+        public void configureToThrowOnNextCall(boolean shouldThrow) {
+            this.shouldThrowOnNextCall = shouldThrow;
         }
     }
 }

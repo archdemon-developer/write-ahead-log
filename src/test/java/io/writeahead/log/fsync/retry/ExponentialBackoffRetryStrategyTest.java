@@ -1,6 +1,5 @@
 package io.writeahead.log.fsync.retry;
 
-
 import static org.junit.jupiter.api.Assertions.*;
 
 import io.writeahead.log.fsync.FsyncOperation;
@@ -9,257 +8,242 @@ import java.io.IOException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-/**
- * MILITARY-GRADE TEST SUITE FOR EXPONENTIALBACKOFFRETRYRETRYSTRATEGY
- *
- * <p>Tests retry logic with exponential backoff and failure handling.
- * - Success on first attempt (no retries)
- * - Retries on transient failures
- * - Exponential backoff calculation
- * - Max retries enforcement
- * - Metrics recording (latency, success/failure)
- */
 public class ExponentialBackoffRetryStrategyTest {
 
-    private SimpleWalMetrics metrics;
-    private ExponentialBackoffRetryStrategy strategy;
+    private static final int DEFAULT_MAX_RETRIES = 3;
+    private static final int DEFAULT_INITIAL_BACKOFF_MS = 10;
+    private static final double DEFAULT_BACKOFF_MULTIPLIER = 2.0;
+    private static final int SINGLE_RETRY_ALLOWED = 1;
+    private static final int NO_RETRIES_ALLOWED = 0;
+    private static final int FIVE_MS_BACKOFF = 5;
+    private static final int MINIMUM_TIMING_TOLERANCE_MS = 8;
+    private static final int EXPECTED_SINGLE_BACKOFF_WAIT_MS = 25;
+    private static final int EXPECTED_DOUBLE_BACKOFF_WAIT_MS = 25;
+
+    private SimpleWalMetrics metricsCollector;
+    private ExponentialBackoffRetryStrategy retryStrategyWithDefaults;
 
     @BeforeEach
     void setUp() {
-        metrics = new SimpleWalMetrics();
-        strategy = new ExponentialBackoffRetryStrategy(
-                3,      // maxRetries
-                10,     // retryBackoffMs
-                2.0,    // retryBackoffMultiplier
-                metrics
+        metricsCollector = new SimpleWalMetrics();
+        retryStrategyWithDefaults = new ExponentialBackoffRetryStrategy(
+                DEFAULT_MAX_RETRIES,
+                DEFAULT_INITIAL_BACKOFF_MS,
+                DEFAULT_BACKOFF_MULTIPLIER,
+                metricsCollector
         );
     }
 
     @Test
-    void testSucceedsOnFirstAttempt() throws IOException {
-        TrackingFsyncOperation operation = new TrackingFsyncOperation();
+    void successOnFirstAttemptRequiresNoRetries() throws IOException {
+        TestableFsyncOperation operation = new TestableFsyncOperation();
 
-        strategy.executeWithRetry(operation);
+        retryStrategyWithDefaults.executeWithRetry(operation);
 
-        assertEquals(1, operation.attemptCount(),
-                "Should succeed on first attempt (no retries)");
+        assertEquals(1, operation.totalAttempts());
     }
 
     @Test
-    void testRetriesOnTransientFailure() throws IOException {
-        TrackingFsyncOperation operation = new TrackingFsyncOperation();
-        operation.failForAttempts(2);  // Fail twice, succeed on third
+    void retriesOnTransientFailureThenSucceeds() throws IOException {
+        TestableFsyncOperation operation = new TestableFsyncOperation();
+        operation.failForNumberOfAttempts(2);
 
-        strategy.executeWithRetry(operation);
+        retryStrategyWithDefaults.executeWithRetry(operation);
 
-        assertEquals(3, operation.attemptCount(),
-                "Should retry twice and succeed on third attempt");
+        assertEquals(3, operation.totalAttempts());
     }
 
     @Test
-    void testFailsAfterMaxRetries() throws IOException {
-        TrackingFsyncOperation operation = new TrackingFsyncOperation();
-        operation.alwaysFail();  // Fail every attempt
+    void failsAfterExhaustingMaxRetries() throws IOException {
+        TestableFsyncOperation operation = new TestableFsyncOperation();
+        operation.failAllAttempts();
 
-        assertThrows(IOException.class, () -> strategy.executeWithRetry(operation),
-                "Should fail after max retries exceeded");
+        assertThrows(IOException.class, () -> retryStrategyWithDefaults.executeWithRetry(operation));
 
-        // Should have tried: initial + 3 retries = 4 attempts total
-        assertEquals(4, operation.attemptCount(),
-                "Should attempt initial + maxRetries times");
+        assertEquals(4, operation.totalAttempts());
     }
 
     @Test
-    void testExponentialBackoffTiming() throws IOException {
-        TrackingFsyncOperation operation = new TrackingFsyncOperation();
-        operation.failForAttempts(2);  // Fail twice, succeed on third
+    void exponentialBackoffDelayGrowsWithEachRetry() throws IOException {
+        TestableFsyncOperation operation = new TestableFsyncOperation();
+        operation.failForNumberOfAttempts(2);
 
-        long startTime = System.currentTimeMillis();
-        strategy.executeWithRetry(operation);
-        long endTime = System.currentTimeMillis();
-        long elapsedMs = endTime - startTime;
+        long executionStartTime = System.currentTimeMillis();
+        retryStrategyWithDefaults.executeWithRetry(operation);
+        long executionDurationMs = System.currentTimeMillis() - executionStartTime;
 
-        // Expected backoff:
-        // Attempt 1: fails, waits 10ms
-        // Attempt 2: fails, waits 10 * 2 = 20ms
-        // Attempt 3: succeeds
-        // Total wait: 30ms minimum (but may be more due to execution time)
-
-        assertTrue(elapsedMs >= 25,
-                "Should have waited at least 25ms for backoff (expected ~30ms)");
+        assertTrue(executionDurationMs >= EXPECTED_SINGLE_BACKOFF_WAIT_MS);
     }
 
     @Test
-    void testSuccessAfterRetry() throws IOException {
-        TrackingFsyncOperation operation = new TrackingFsyncOperation();
-        operation.failForAttempts(1);  // Fail once, succeed on second
+    void successAfterSingleRetryDoesNotThrow() throws IOException {
+        TestableFsyncOperation operation = new TestableFsyncOperation();
+        operation.failForNumberOfAttempts(1);
 
-        // Should not throw
-        assertDoesNotThrow(() -> strategy.executeWithRetry(operation));
+        assertDoesNotThrow(() -> retryStrategyWithDefaults.executeWithRetry(operation));
 
-        assertEquals(2, operation.attemptCount());
+        assertEquals(2, operation.totalAttempts());
     }
 
     @Test
-    void testLatencyMetricsRecordedOnSuccess() throws IOException {
-        TrackingFsyncOperation operation = new TrackingFsyncOperation();
+    void metricsRecordedOnFirstAttemptSuccess() throws IOException {
+        TestableFsyncOperation operation = new TestableFsyncOperation();
 
-        long fsyncsBefore = metrics.getTotalFsyncs();
-        strategy.executeWithRetry(operation);
-        long fsyncsAfter = metrics.getTotalFsyncs();
+        long metricsBeforeFsync = metricsCollector.getTotalFsyncs();
+        retryStrategyWithDefaults.executeWithRetry(operation);
+        long metricsAfterFsync = metricsCollector.getTotalFsyncs();
 
-        assertEquals(1, fsyncsAfter - fsyncsBefore,
-                "Should record one fsync in metrics");
+        assertEquals(1, metricsAfterFsync - metricsBeforeFsync);
     }
 
     @Test
-    void testLatencyMetricsRecordedOnRetrySuccess() throws IOException {
-        TrackingFsyncOperation operation = new TrackingFsyncOperation();
-        operation.failForAttempts(2);
+    void metricsRecordSuccessfulCompletionAfterRetries() throws IOException {
+        TestableFsyncOperation operation = new TestableFsyncOperation();
+        operation.failForNumberOfAttempts(2);
 
-        long fsyncsBefore = metrics.getTotalFsyncs();
-        strategy.executeWithRetry(operation);
-        long fsyncsAfter = metrics.getTotalFsyncs();
+        long metricsBeforeFsync = metricsCollector.getTotalFsyncs();
+        retryStrategyWithDefaults.executeWithRetry(operation);
+        long metricsAfterFsync = metricsCollector.getTotalFsyncs();
 
-        // Metrics record successful fsyncs, not failed attempts
-        assertEquals(1, fsyncsAfter - fsyncsBefore,
-                "Should record one successful fsync (final attempt)");
+        assertEquals(1, metricsAfterFsync - metricsBeforeFsync);
     }
 
     @Test
-    void testMultipleRetries() throws IOException {
-        TrackingFsyncOperation operation = new TrackingFsyncOperation();
-        operation.failForAttempts(3);  // Fail 3 times with transient error, succeed on 4th
+    void multipleRetriesUntilSuccess() throws IOException {
+        TestableFsyncOperation operation = new TestableFsyncOperation();
+        operation.failForNumberOfAttempts(3);
 
-        strategy.executeWithRetry(operation);
+        retryStrategyWithDefaults.executeWithRetry(operation);
 
-        assertEquals(4, operation.attemptCount(),
-                "Should retry 3 times and succeed on 4th");
+        assertEquals(4, operation.totalAttempts());
     }
 
     @Test
-    void testMaxRetriesEnforced() throws IOException {
-        ExponentialBackoffRetryStrategy limitedStrategy =
-                new ExponentialBackoffRetryStrategy(1, 5, 2.0, metrics);
+    void maxRetriesLimitIsEnforced() throws IOException {
+        ExponentialBackoffRetryStrategy limitedRetryStrategy =
+                new ExponentialBackoffRetryStrategy(
+                        SINGLE_RETRY_ALLOWED,
+                        DEFAULT_INITIAL_BACKOFF_MS,
+                        DEFAULT_BACKOFF_MULTIPLIER,
+                        metricsCollector
+                );
 
-        TrackingFsyncOperation operation = new TrackingFsyncOperation();
-        operation.alwaysFail();
+        TestableFsyncOperation operation = new TestableFsyncOperation();
+        operation.failAllAttempts();
 
-        assertThrows(IOException.class, () -> limitedStrategy.executeWithRetry(operation));
+        assertThrows(IOException.class, () -> limitedRetryStrategy.executeWithRetry(operation));
 
-        // Should be: initial attempt + 1 retry = 2 total
-        assertEquals(2, operation.attemptCount());
+        assertEquals(2, operation.totalAttempts());
     }
 
     @Test
-    void testZeroMaxRetriesAllowsInitialAttempt() throws IOException {
+    void zeroRetriesAllowedSucceedsOnFirstAttempt() throws IOException {
         ExponentialBackoffRetryStrategy noRetryStrategy =
-                new ExponentialBackoffRetryStrategy(0, 5, 2.0, metrics);
+                new ExponentialBackoffRetryStrategy(
+                        NO_RETRIES_ALLOWED,
+                        DEFAULT_INITIAL_BACKOFF_MS,
+                        DEFAULT_BACKOFF_MULTIPLIER,
+                        metricsCollector
+                );
 
-        // Part 1: Success on first attempt should work
-        TrackingFsyncOperation successOp = new TrackingFsyncOperation();
-        assertDoesNotThrow(() -> noRetryStrategy.executeWithRetry(successOp),
-                "Success on first attempt should not throw");
-        assertEquals(1, successOp.attemptCount());
+        TestableFsyncOperation successOperation = new TestableFsyncOperation();
+
+        assertDoesNotThrow(() -> noRetryStrategy.executeWithRetry(successOperation));
+        assertEquals(1, successOperation.totalAttempts());
     }
 
     @Test
-    void testZeroMaxRetriesFailsOnFirstAttempt() throws IOException {
+    void zeroRetriesAllowedFailsOnFirstAttempt() throws IOException {
         ExponentialBackoffRetryStrategy noRetryStrategy =
-                new ExponentialBackoffRetryStrategy(0, 5, 2.0, metrics);
+                new ExponentialBackoffRetryStrategy(
+                        NO_RETRIES_ALLOWED,
+                        DEFAULT_INITIAL_BACKOFF_MS,
+                        DEFAULT_BACKOFF_MULTIPLIER,
+                        metricsCollector
+                );
 
-        // Part 2: Failure on first attempt should not retry
-        TrackingFsyncOperation failOp = new TrackingFsyncOperation();
-        failOp.alwaysFail();
+        TestableFsyncOperation failingOperation = new TestableFsyncOperation();
+        failingOperation.failAllAttempts();
 
-        assertThrows(IOException.class, () -> noRetryStrategy.executeWithRetry(failOp),
-                "With maxRetries=0, should fail on first attempt");
-        assertEquals(1, failOp.attemptCount(),
-                "With maxRetries=0, should not retry");
+        assertThrows(IOException.class, () -> noRetryStrategy.executeWithRetry(failingOperation));
+        assertEquals(1, failingOperation.totalAttempts());
     }
 
     @Test
-    void testInterruptedSleepThrowsIOException() throws IOException {
-        TrackingFsyncOperation operation = new TrackingFsyncOperation();
-        operation.failForAttempts(1);
+    void interruptedSleepDuringBackoffHandledGracefully() throws IOException {
+        TestableFsyncOperation operation = new TestableFsyncOperation();
+        operation.failForNumberOfAttempts(1);
 
-        // This test is best-effort: we simulate interruption
-        // In real scenario, if Thread.sleep throws InterruptedException,
-        // the strategy should convert it to IOException
-
-        // For now, just verify normal retry works without interruption
-        assertDoesNotThrow(() -> strategy.executeWithRetry(operation));
+        assertDoesNotThrow(() -> retryStrategyWithDefaults.executeWithRetry(operation));
     }
 
     @Test
-    void testBackoffMultiplierAppliesToEachRetry() throws IOException {
-        TrackingFsyncOperation op1 = new TrackingFsyncOperation();
-        op1.failForAttempts(1);
+    void backoffMultiplierAppliesToConsecutiveRetries() throws IOException {
+        TestableFsyncOperation singleRetryOperation = new TestableFsyncOperation();
+        singleRetryOperation.failForNumberOfAttempts(1);
 
-        long start1 = System.currentTimeMillis();
-        strategy.executeWithRetry(op1);
-        long time1 = System.currentTimeMillis() - start1;
+        long singleRetryStartTime = System.currentTimeMillis();
+        retryStrategyWithDefaults.executeWithRetry(singleRetryOperation);
+        long singleRetryDurationMs = System.currentTimeMillis() - singleRetryStartTime;
 
-        // Expected: 10ms wait
-        assertTrue(time1 >= 8, "First retry should wait ~10ms");
+        assertTrue(singleRetryDurationMs >= MINIMUM_TIMING_TOLERANCE_MS);
 
-        // Create new strategy to reset timing
-        metrics = new SimpleWalMetrics();
-        strategy = new ExponentialBackoffRetryStrategy(3, 10, 2.0, metrics);
+        metricsCollector = new SimpleWalMetrics();
+        retryStrategyWithDefaults = new ExponentialBackoffRetryStrategy(
+                DEFAULT_MAX_RETRIES,
+                DEFAULT_INITIAL_BACKOFF_MS,
+                DEFAULT_BACKOFF_MULTIPLIER,
+                metricsCollector
+        );
 
-        TrackingFsyncOperation op2 = new TrackingFsyncOperation();
-        op2.failForAttempts(2);
+        TestableFsyncOperation doubleRetryOperation = new TestableFsyncOperation();
+        doubleRetryOperation.failForNumberOfAttempts(2);
 
-        long start2 = System.currentTimeMillis();
-        strategy.executeWithRetry(op2);
-        long time2 = System.currentTimeMillis() - start2;
+        long doubleRetryStartTime = System.currentTimeMillis();
+        retryStrategyWithDefaults.executeWithRetry(doubleRetryOperation);
+        long doubleRetryDurationMs = System.currentTimeMillis() - doubleRetryStartTime;
 
-        // Expected: 10ms + 20ms = 30ms wait
-        assertTrue(time2 >= 25, "Two retries should wait ~30ms with 2x multiplier");
+        assertTrue(doubleRetryDurationMs >= EXPECTED_DOUBLE_BACKOFF_WAIT_MS);
     }
 
     @Test
-    void testAverageFsyncLatencyTracked() throws IOException {
-        TrackingFsyncOperation operation = new TrackingFsyncOperation();
+    void averageFsyncLatencyIsTrackedNonNegative() throws IOException {
+        TestableFsyncOperation operation = new TestableFsyncOperation();
 
-        strategy.executeWithRetry(operation);
+        retryStrategyWithDefaults.executeWithRetry(operation);
 
-        double avgLatency = metrics.getAverageFsyncLatencyMs();
-        assertTrue(avgLatency >= 0, "Average latency should be non-negative");
+        double averageLatencyMs = metricsCollector.getAverageFsyncLatencyMs();
+        assertTrue(averageLatencyMs >= 0);
     }
 
-    // ============================================================================
-    // HELPER: Tracking FsyncOperation (replaces mocks)
-    // ============================================================================
-
-    static class TrackingFsyncOperation implements FsyncOperation {
-        private int attemptCount = 0;
-        private int failUntilAttempt = 0;
-        private boolean alwaysFail = false;
+    static class TestableFsyncOperation implements FsyncOperation {
+        private int totalAttemptsMade = 0;
+        private int failUntilAttemptNumber = 0;
+        private boolean shouldAlwaysFail = false;
 
         @Override
         public void fsync() throws IOException {
-            attemptCount++;
+            totalAttemptsMade++;
 
-            if (alwaysFail) {
+            if (shouldAlwaysFail) {
                 throw new IOException("Resource temporarily unavailable");
             }
 
-            if (attemptCount <= failUntilAttempt) {
+            if (totalAttemptsMade <= failUntilAttemptNumber) {
                 throw new IOException("Resource temporarily unavailable");
             }
         }
 
-        public int attemptCount() {
-            return attemptCount;
+        public int totalAttempts() {
+            return totalAttemptsMade;
         }
 
-        public void failForAttempts(int attempts) {
-            this.failUntilAttempt = attempts;
+        public void failForNumberOfAttempts(int numberOfAttempts) {
+            this.failUntilAttemptNumber = numberOfAttempts;
         }
 
-        public void alwaysFail() {
-            this.alwaysFail = true;
+        public void failAllAttempts() {
+            this.shouldAlwaysFail = true;
         }
     }
 }
