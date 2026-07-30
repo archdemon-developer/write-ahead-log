@@ -2,7 +2,7 @@ package io.writeahead.log.segments;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-import io.writeahead.log.models.file.FileStream;
+import io.writeahead.log.models.FileStream;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;

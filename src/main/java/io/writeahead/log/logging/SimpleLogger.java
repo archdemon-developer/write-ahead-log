@@ -1,5 +1,7 @@
 package io.writeahead.log.logging;
 
+import io.writeahead.log.enums.LogLevel;
+
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 

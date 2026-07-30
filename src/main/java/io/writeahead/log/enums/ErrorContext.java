@@ -1,4 +1,4 @@
-package io.writeahead.log.exceptions;
+package io.writeahead.log.enums;
 
 public enum ErrorContext {
     DISK_FULL("Disk full"),

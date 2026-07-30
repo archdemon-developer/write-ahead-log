@@ -1,4 +1,4 @@
-package io.writeahead.log.exceptions;
+package io.writeahead.log.enums;
 
 public enum RecoveryType {
     SEGMENT_TOO_SMALL("Segment file smaller than minimum size"),

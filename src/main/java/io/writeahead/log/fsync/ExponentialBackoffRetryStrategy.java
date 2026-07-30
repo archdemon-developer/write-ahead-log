@@ -1,8 +1,6 @@
-package io.writeahead.log.fsync.retry;
+package io.writeahead.log.fsync;
 
 import io.writeahead.log.exceptions.WalException;
-import io.writeahead.log.fsync.FsyncOperation;
-import io.writeahead.log.fsync.FsyncRetryStrategy;
 import io.writeahead.log.logging.Logger;
 import io.writeahead.log.logging.LoggerFactory;
 import io.writeahead.log.metrics.SimpleWalMetrics;

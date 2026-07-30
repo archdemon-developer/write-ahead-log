@@ -2,14 +2,18 @@ package io.writeahead.log.segments;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-import io.writeahead.log.models.wal.WalMetadata;
+import io.writeahead.log.models.WalMetadata;
+
+import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Comparator;
 
+import io.writeahead.log.utils.FileUtils;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 public class SegmentMetadataRecoveryTest {
@@ -30,14 +34,17 @@ public class SegmentMetadataRecoveryTest {
     private static final int SINGLE_SEGMENT = 1;
     private static final int TWO_SEGMENTS = 2;
     private static final int THREE_SEGMENTS = 3;
-
+    private static final int MAX_SEGMENT_SIZE = 1_000_000;
+    private static final int BATCH_SIZE_ONE = 1;
     private Path tempLogDirectory;
     private SegmentMetadataRecovery recoveryUnderTest;
+    private SegmentLifecycleManager lifecycleManager;
 
     @BeforeEach
     void setUp() throws IOException {
         tempLogDirectory = Files.createTempDirectory("segment-recovery-test-");
         recoveryUnderTest = new SegmentMetadataRecovery(tempLogDirectory.toString());
+        lifecycleManager = new SegmentLifecycleManager(tempLogDirectory.toString());
     }
 
     @AfterEach
@@ -172,5 +179,195 @@ public class SegmentMetadataRecoveryTest {
                 firstRecovery.segments().getFirst().sequenceNumber(),
                 secondRecovery.segments().getFirst().sequenceNumber()
         );
+    }
+
+    @Nested
+    class CorruptionDetectionTests {
+
+        private static final long TIMESTAMP_1000 = 1000L;
+        private static final long TIMESTAMP_2000 = 2000L;
+        private static final String TEST_ENTRY_DATA = "test entry payload";
+        private static final long SEGMENT_SEQUENCE = 1L;
+        private static final int ENTRY_COUNT = 100;
+        private static final long MIN_TIMESTAMP = 1000L;
+        private static final long MAX_TIMESTAMP = 2000L;
+
+        @Test
+        void corruptedFooterCrcDetected() throws Exception {
+            var segmentStream = lifecycleManager.createNewSegment(SEGMENT_SEQUENCE);
+            lifecycleManager.finalizeSegment(segmentStream, ENTRY_COUNT, MIN_TIMESTAMP, MAX_TIMESTAMP);
+
+            File segmentFile = getSegmentFile();
+            byte[] allBytes = FileUtils.readAllBytes(segmentFile);
+            int footerStart = allBytes.length - 36;
+            allBytes[footerStart + 28] = (byte) ~allBytes[footerStart + 28];
+            Files.write(segmentFile.toPath(), allBytes);
+
+            SegmentMetadataRecovery recoveryUnderTest = new SegmentMetadataRecovery(tempLogDirectory.toString());
+            WalMetadata recoveredMetadata = recoveryUnderTest.recover();
+
+            assertEquals(0, recoveredMetadata.segments().size());
+        }
+
+        private File getSegmentFile() throws Exception {
+            File logDir = tempLogDirectory.toFile();
+            File[] segmentFiles = logDir.listFiles((dir, name) -> name.endsWith(".log"));
+            if (segmentFiles == null || segmentFiles.length == 0) {
+                throw new Exception("No segment file found");
+            }
+            return segmentFiles[0];
+        }
+    }
+
+
+    @Nested
+    class EdgeCasesTests {
+
+        private static final int ENTRY_COUNT = 100;
+        private static final long MIN_TIMESTAMP = 1000L;
+        private static final long MAX_TIMESTAMP = 2000L;
+
+        @Test
+        void recoverSegmentWithSizeJustBelowMinimumSkipsSegmentFromRecovery() throws Exception {
+            createSegmentFileWithCustomSize(1L, 83L);
+
+            WalMetadata recoveredWalMetadata = recoveryUnderTest.recover();
+
+            assertEquals(0, recoveredWalMetadata.segments().size());
+        }
+
+        @Test
+        void recoverMultipleSegmentsOneTooSmallSkipsSmallOnly() throws Exception {
+            var firstSegmentStream = lifecycleManager.createNewSegment(1L);
+            lifecycleManager.finalizeSegment(firstSegmentStream, 50, 1000L, 2000L);
+
+            createSegmentFileWithCustomSize(2L, 50L);
+
+            var thirdSegmentStream = lifecycleManager.createNewSegment(3L);
+            lifecycleManager.finalizeSegment(thirdSegmentStream, 75, 3000L, 4000L);
+
+            WalMetadata recoveredWalMetadata = recoveryUnderTest.recover();
+
+            assertEquals(2, recoveredWalMetadata.segments().size());
+            assertEquals(1L, recoveredWalMetadata.segments().get(0).sequenceNumber());
+            assertEquals(3L, recoveredWalMetadata.segments().get(1).sequenceNumber());
+        }
+
+        @Test
+        void recoverSegmentWithSingleByteSkipsSegmentFromRecovery() throws Exception {
+            createSegmentFileWithCustomSize(1L, 1L);
+
+            WalMetadata recoveredWalMetadata = recoveryUnderTest.recover();
+
+            assertEquals(0, recoveredWalMetadata.segments().size());
+        }
+
+        @Test
+        void recoverSegmentWithSmallSizeSkipsSegmentFromRecovery() throws Exception {
+            createSegmentFileWithCustomSize(1L, 50L);
+
+            WalMetadata recoveredWalMetadata = recoveryUnderTest.recover();
+
+            assertEquals(0, recoveredWalMetadata.segments().size());
+        }
+
+        @Test
+        void recoverSegmentWithZeroBytesSkipsSegmentFromRecovery() throws Exception {
+            createSegmentFileWithCustomSize(1L, 0L);
+
+            WalMetadata recoveredWalMetadata = recoveryUnderTest.recover();
+
+            assertEquals(0, recoveredWalMetadata.segments().size());
+        }
+
+        @Test
+        void recoverContinuesAfterEncounteringSegmentsTooSmall() throws Exception {
+            var firstSegmentStream = lifecycleManager.createNewSegment(1L);
+            lifecycleManager.finalizeSegment(firstSegmentStream, 50, 1000L, 2000L);
+
+            createSegmentFileWithCustomSize(2L, 25L);
+
+            var thirdSegmentStream = lifecycleManager.createNewSegment(3L);
+            lifecycleManager.finalizeSegment(thirdSegmentStream, 75, 3000L, 4000L);
+
+            createSegmentFileWithCustomSize(4L, 40L);
+
+            var fifthSegmentStream = lifecycleManager.createNewSegment(5L);
+            lifecycleManager.finalizeSegment(fifthSegmentStream, 60, 5000L, 6000L);
+
+            WalMetadata recoveredWalMetadata = recoveryUnderTest.recover();
+
+            assertEquals(3, recoveredWalMetadata.segments().size());
+            assertEquals(1L, recoveredWalMetadata.segments().get(0).sequenceNumber());
+            assertEquals(3L, recoveredWalMetadata.segments().get(1).sequenceNumber());
+            assertEquals(5L, recoveredWalMetadata.segments().get(2).sequenceNumber());
+        }
+
+        @Test
+        void recoverAllSegmentsTooSmallReturnsEmptyList() throws Exception {
+            createSegmentFileWithCustomSize(1L, 50L);
+            createSegmentFileWithCustomSize(2L, 60L);
+            createSegmentFileWithCustomSize(3L, 70L);
+
+            WalMetadata recoveredWalMetadata = recoveryUnderTest.recover();
+
+            assertEquals(0, recoveredWalMetadata.segments().size());
+        }
+
+        @Test
+        void recoverWithValidSegmentsReturnsCorrectMetadata() throws Exception {
+            var firstSegmentStream = lifecycleManager.createNewSegment(1L);
+            lifecycleManager.finalizeSegment(firstSegmentStream, 50, 1000L, 2000L);
+
+            createSegmentFileWithCustomSize(2L, 40L);
+
+            var thirdSegmentStream = lifecycleManager.createNewSegment(3L);
+            lifecycleManager.finalizeSegment(thirdSegmentStream, 75, 3000L, 4000L);
+
+            WalMetadata recoveredWalMetadata = recoveryUnderTest.recover();
+
+            assertEquals(2, recoveredWalMetadata.segments().size());
+            assertEquals(50, recoveredWalMetadata.segments().get(0).entryCount());
+            assertEquals(75, recoveredWalMetadata.segments().get(1).entryCount());
+        }
+
+        @Test
+        void recoverNextSequenceCalculatedFromValidSegmentsOnly() throws Exception {
+            var firstSegmentStream = lifecycleManager.createNewSegment(1L);
+            lifecycleManager.finalizeSegment(firstSegmentStream, 50, 1000L, 2000L);
+
+            createSegmentFileWithCustomSize(2L, 30L);
+
+            var thirdSegmentStream = lifecycleManager.createNewSegment(3L);
+            lifecycleManager.finalizeSegment(thirdSegmentStream, 75, 3000L, 4000L);
+
+            createSegmentFileWithCustomSize(4L, 20L);
+
+            WalMetadata recoveredWalMetadata = recoveryUnderTest.recover();
+
+            assertEquals(2, recoveredWalMetadata.segments().size());
+            assertEquals(4L, recoveredWalMetadata.nextSequence());
+        }
+
+        @Test
+        void recoverSegmentWithMinimumValidSizeIsRecovered() throws Exception {
+            var firstSegmentStream = lifecycleManager.createNewSegment(1L);
+            lifecycleManager.finalizeSegment(firstSegmentStream, ENTRY_COUNT, MIN_TIMESTAMP, MAX_TIMESTAMP);
+
+            WalMetadata recoveredWalMetadata = recoveryUnderTest.recover();
+
+            assertEquals(1, recoveredWalMetadata.segments().size());
+        }
+
+        private File createSegmentFileWithCustomSize(long sequenceNumber, long fileSizeInBytes) throws Exception {
+            File logDir = tempLogDirectory.toFile();
+            String timestampedFilename = SegmentLifecycleManager.generateSegmentFilename(sequenceNumber);
+            File segmentFile = new File(logDir, timestampedFilename);
+
+            byte[] minimumSizeBytes = new byte[(int) fileSizeInBytes];
+            Files.write(segmentFile.toPath(), minimumSizeBytes);
+
+            return segmentFile;
+        }
     }
 }

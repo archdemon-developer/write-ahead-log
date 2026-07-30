@@ -1,5 +1,9 @@
 package io.writeahead.log.exceptions;
 
+import io.writeahead.log.enums.ErrorContext;
+import io.writeahead.log.enums.ErrorRecoveryAction;
+import io.writeahead.log.enums.RecoveryType;
+
 public class RecoveryException extends WalException {
 
     private final RecoveryType recoveryType;

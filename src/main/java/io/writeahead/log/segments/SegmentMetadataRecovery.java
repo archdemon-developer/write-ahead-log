@@ -2,11 +2,14 @@ package io.writeahead.log.segments;
 
 import io.writeahead.log.constants.WalConstants;
 import io.writeahead.log.exceptions.CorruptionException;
-import io.writeahead.log.exceptions.CorruptionType;
-import io.writeahead.log.exceptions.RecoveryType;
+import io.writeahead.log.enums.CorruptionType;
+import io.writeahead.log.enums.RecoveryType;
 import io.writeahead.log.logging.Logger;
 import io.writeahead.log.logging.LoggerFactory;
-import io.writeahead.log.models.wal.WalMetadata;
+import io.writeahead.log.models.SegmentFooter;
+import io.writeahead.log.models.SegmentHeader;
+import io.writeahead.log.models.SegmentMetadata;
+import io.writeahead.log.models.WalMetadata;
 import io.writeahead.log.utils.FileUtils;
 import io.writeahead.log.utils.WalErrorClassifier;
 

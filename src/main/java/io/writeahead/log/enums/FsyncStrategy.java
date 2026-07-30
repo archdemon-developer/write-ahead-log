@@ -1,4 +1,4 @@
-package io.writeahead.log.fsync;
+package io.writeahead.log.enums;
 
 public enum FsyncStrategy {
   FSYNC_EVERY_BATCH,

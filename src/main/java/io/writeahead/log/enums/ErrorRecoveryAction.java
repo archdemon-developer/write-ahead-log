@@ -1,4 +1,4 @@
-package io.writeahead.log.exceptions;
+package io.writeahead.log.enums;
 
 public enum ErrorRecoveryAction {
     RETRY_WITH_BACKOFF("Retry operation with exponential backoff"),

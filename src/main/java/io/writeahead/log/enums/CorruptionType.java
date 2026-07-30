@@ -1,4 +1,4 @@
-package io.writeahead.log.exceptions;
+package io.writeahead.log.enums;
 
 public enum CorruptionType {
     HEADER_CRC_MISMATCH("Header CRC doesn't match data"),

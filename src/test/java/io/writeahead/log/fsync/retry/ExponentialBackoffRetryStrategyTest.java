@@ -2,6 +2,7 @@ package io.writeahead.log.fsync.retry;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import io.writeahead.log.fsync.ExponentialBackoffRetryStrategy;
 import io.writeahead.log.fsync.FsyncOperation;
 import io.writeahead.log.metrics.SimpleWalMetrics;
 import java.io.IOException;

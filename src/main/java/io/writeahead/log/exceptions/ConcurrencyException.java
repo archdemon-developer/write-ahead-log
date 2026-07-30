@@ -1,5 +1,9 @@
 package io.writeahead.log.exceptions;
 
+import io.writeahead.log.enums.ConcurrencyErrorType;
+import io.writeahead.log.enums.ErrorContext;
+import io.writeahead.log.enums.ErrorRecoveryAction;
+
 public class ConcurrencyException extends WalException {
 
     private final ConcurrencyErrorType concurrencyErrorType;

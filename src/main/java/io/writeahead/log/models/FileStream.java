@@ -1,4 +1,4 @@
-package io.writeahead.log.models.file;
+package io.writeahead.log.models;
 
 import java.io.DataOutputStream;
 import java.io.FileOutputStream;

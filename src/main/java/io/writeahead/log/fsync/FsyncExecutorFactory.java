@@ -1,11 +1,7 @@
-package io.writeahead.log.fsync.factory;
+package io.writeahead.log.fsync;
 
-import io.writeahead.log.fsync.FsyncStrategy;
-import io.writeahead.log.fsync.FsyncExecutor;
-import io.writeahead.log.fsync.FsyncRetryStrategy;
-import io.writeahead.log.fsync.executor.EveryBatchFsyncExecutor;
-import io.writeahead.log.fsync.executor.EveryEntryFsyncExecutor;
-import io.writeahead.log.models.file.FileStream;
+import io.writeahead.log.enums.FsyncStrategy;
+import io.writeahead.log.models.FileStream;
 
 public class FsyncExecutorFactory {
 

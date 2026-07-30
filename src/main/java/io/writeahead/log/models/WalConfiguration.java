@@ -1,6 +1,6 @@
-package io.writeahead.log.models.wal;
+package io.writeahead.log.models;
 
-import io.writeahead.log.fsync.FsyncStrategy;
+import io.writeahead.log.enums.FsyncStrategy;
 
 public record WalConfiguration(
     int batchSize,

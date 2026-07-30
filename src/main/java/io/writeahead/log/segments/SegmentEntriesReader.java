@@ -1,6 +1,6 @@
 package io.writeahead.log.segments;
 
-import io.writeahead.log.exceptions.CorruptionType;
+import io.writeahead.log.enums.CorruptionType;
 import io.writeahead.log.logging.Logger;
 import io.writeahead.log.logging.LoggerFactory;
 import io.writeahead.log.models.LogEntry;

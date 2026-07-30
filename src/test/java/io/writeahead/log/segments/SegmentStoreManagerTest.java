@@ -3,7 +3,7 @@ package io.writeahead.log.segments;
 import static org.junit.jupiter.api.Assertions.*;
 
 import io.writeahead.log.models.LogEntry;
-import io.writeahead.log.models.wal.WalConfiguration;
+import io.writeahead.log.models.WalConfiguration;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import org.junit.jupiter.api.AfterEach;

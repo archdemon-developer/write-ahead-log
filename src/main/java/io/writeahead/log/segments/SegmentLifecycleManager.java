@@ -2,7 +2,9 @@ package io.writeahead.log.segments;
 
 import io.writeahead.log.logging.Logger;
 import io.writeahead.log.logging.LoggerFactory;
-import io.writeahead.log.models.file.FileStream;
+import io.writeahead.log.models.SegmentFooter;
+import io.writeahead.log.models.SegmentHeader;
+import io.writeahead.log.models.FileStream;
 import io.writeahead.log.utils.FileUtils;
 import io.writeahead.log.utils.WalErrorClassifier;
 

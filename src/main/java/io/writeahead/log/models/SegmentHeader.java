@@ -1,4 +1,4 @@
-package io.writeahead.log.segments;
+package io.writeahead.log.models;
 
 import io.writeahead.log.constants.WalConstants;
 import io.writeahead.log.utils.Crc32Utils;

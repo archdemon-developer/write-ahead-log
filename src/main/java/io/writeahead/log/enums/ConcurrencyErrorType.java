@@ -1,4 +1,4 @@
-package io.writeahead.log.exceptions;
+package io.writeahead.log.enums;
 
 public enum ConcurrencyErrorType {
     LOCK_TIMEOUT("Lock acquisition timeout"),
