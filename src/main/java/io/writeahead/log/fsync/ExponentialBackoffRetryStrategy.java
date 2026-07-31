@@ -39,6 +39,7 @@ public class ExponentialBackoffRetryStrategy implements FsyncRetryStrategy {
         metrics.recordFsync(latencyMs);
 
         if (attempt > 0) {
+          metrics.recordFsyncRetrySuccess(attempt);
           log.info("Fsync succeeded on attempt {}", attempt);
         }
         return;
@@ -46,11 +47,13 @@ public class ExponentialBackoffRetryStrategy implements FsyncRetryStrategy {
         WalException walEx = WalErrorClassifier.classifyIOException(ex, "fsync");
 
         if (walEx.isTransient() && attempt < maxRetries) {
+          metrics.recordFsyncTransientFailure(walEx.context());
           long waitMs = (long) (retryBackoffMs * Math.pow(retryBackoffMultiplier, attempt));
           log.warn("Fsync attempt {}/{} failed (transient), retrying in {}ms: {}",
                   attempt + 1, maxRetries + 1, waitMs, ex.getMessage());
           sleep(waitMs);
         } else {
+          metrics.recordFsyncPermanentFailure(walEx.context());
           throw walEx;
         }
       }

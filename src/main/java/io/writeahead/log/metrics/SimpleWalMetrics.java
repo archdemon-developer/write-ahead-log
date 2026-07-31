@@ -25,10 +25,16 @@ public class SimpleWalMetrics implements WalMetrics, WalPerformanceMetrics {
   private final Map<String, Long> fsyncPermanentErrorCounts = new ConcurrentHashMap<>();
   private final AtomicLong segmentCorruptionCount = new AtomicLong(0);
   private final Map<String, Long> corruptionTypeCounts = new ConcurrentHashMap<>();
-  private final AtomicLong segmentQuarantinedCount = new AtomicLong(0);
-  private final AtomicLong segmentRecoveryErrorCount = new AtomicLong(0);
-  private final Map<String, Long> alertCounts = new ConcurrentHashMap<>();
+
   private final AtomicLong fsyncRetrySuccessCount = new AtomicLong(0);
+
+  private final AtomicLong recoveryCount = new AtomicLong(0);
+  private final AtomicLong totalRecoveryTimeMs = new AtomicLong(0);
+  private final AtomicLong lastRecoverySegmentsScanned = new AtomicLong(0);
+  private final AtomicLong lastRecoverySegmentsRecovered = new AtomicLong(0);
+
+  private static final double BYTES_PER_MB = 1024.0 * 1024.0;
+  private static final double MILLISECONDS_PER_SECOND = 1000.0;
 
   public void recordEntryWritten(int size) {
     entriesWritten.incrementAndGet();
@@ -84,7 +90,7 @@ public class SimpleWalMetrics implements WalMetrics, WalPerformanceMetrics {
     if (elapsedMs == 0) {
       return 0.0;
     }
-    return entriesWritten.get() / (elapsedMs / 1000.0);
+    return entriesWritten.get() / (elapsedMs / MILLISECONDS_PER_SECOND);
   }
 
   @Override
@@ -93,8 +99,8 @@ public class SimpleWalMetrics implements WalMetrics, WalPerformanceMetrics {
     if (elapsedMs == 0) {
       return 0.0;
     }
-    double mbWritten = bytesWritten.get() / (1024.0 * 1024.0);
-    return mbWritten / (elapsedMs / 1000.0);
+    double mbWritten = bytesWritten.get() / BYTES_PER_MB;
+    return mbWritten / (elapsedMs / MILLISECONDS_PER_SECOND);
   }
 
   @Override
@@ -136,12 +142,31 @@ public class SimpleWalMetrics implements WalMetrics, WalPerformanceMetrics {
     corruptionTypeCounts.merge(type.name(), 1L, Long::sum);
   }
 
-  public void recordSegmentQuarantined() {
-    segmentQuarantinedCount.incrementAndGet();
+  public void recordRecoveryCompleted(long durationMs, long segmentsScanned, long segmentsRecovered) {
+    recoveryCount.incrementAndGet();
+    totalRecoveryTimeMs.addAndGet(durationMs);
+    lastRecoverySegmentsScanned.set(segmentsScanned);
+    lastRecoverySegmentsRecovered.set(segmentsRecovered);
   }
 
-  public void recordSegmentRecoveryError() {
-    segmentRecoveryErrorCount.incrementAndGet();
+  public long getRecoveryCount() {
+    return recoveryCount.get();
+  }
+
+  public double getAverageRecoveryTimeMs() {
+    long count = recoveryCount.get();
+    if (count == 0) {
+      return 0.0;
+    }
+    return (double) totalRecoveryTimeMs.get() / count;
+  }
+
+  public long getLastRecoverySegmentsScanned() {
+    return lastRecoverySegmentsScanned.get();
+  }
+
+  public long getLastRecoverySegmentsRecovered() {
+    return lastRecoverySegmentsRecovered.get();
   }
 
   public Map<String, Long> getFsyncTransientErrorCounts() {
@@ -158,18 +183,6 @@ public class SimpleWalMetrics implements WalMetrics, WalPerformanceMetrics {
 
   public Map<String, Long> getCorruptionTypeCounts() {
     return new ConcurrentHashMap<>(corruptionTypeCounts);
-  }
-
-  public long getSegmentQuarantinedCount() {
-    return segmentQuarantinedCount.get();
-  }
-
-  public long getSegmentRecoveryErrorCount() {
-    return segmentRecoveryErrorCount.get();
-  }
-
-  public Map<String, Long> getAlertCounts() {
-    return new ConcurrentHashMap<>(alertCounts);
   }
 
   public long getFsyncRetrySuccessCount() {

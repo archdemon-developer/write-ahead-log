@@ -3,6 +3,7 @@ package io.writeahead.log.segments;
 import io.writeahead.log.enums.CorruptionType;
 import io.writeahead.log.logging.Logger;
 import io.writeahead.log.logging.LoggerFactory;
+import io.writeahead.log.metrics.SimpleWalMetrics;
 import io.writeahead.log.models.LogEntry;
 import io.writeahead.log.serdes.EntrySerdes;
 import io.writeahead.log.utils.Crc32Utils;
@@ -15,6 +16,12 @@ import java.util.List;
 public class SegmentEntriesReader {
 
     private final Logger log = LoggerFactory.getLogger(SegmentEntriesReader.class);
+
+    private final SimpleWalMetrics metrics;
+
+    public SegmentEntriesReader(SimpleWalMetrics metrics) {
+        this.metrics = metrics;
+    }
 
     public SegmentReadResult readEntriesFromRegion(byte[] entryRegionBytes) throws IOException {
         List<LogEntry> logEntries = new ArrayList<>();
@@ -35,6 +42,8 @@ public class SegmentEntriesReader {
                     long computedCrc = Crc32Utils.computeEntryCrc(timestamp, size, data);
 
                     if (computedCrc != storedCrc) {
+                        metrics.recordCorruptedEntry();
+                        metrics.recordCorruptionType(CorruptionType.ENTRY_CRC_MISMATCH);
                         throw WalErrorClassifier.classifyCorruption(
                                 "unknown-segment", 0, CorruptionType.ENTRY_CRC_MISMATCH,
                                 computedCrc, storedCrc, "Entry CRC mismatch at entry " + entriesRead);

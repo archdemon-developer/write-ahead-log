@@ -6,6 +6,7 @@ import io.writeahead.log.enums.CorruptionType;
 import io.writeahead.log.enums.RecoveryType;
 import io.writeahead.log.logging.Logger;
 import io.writeahead.log.logging.LoggerFactory;
+import io.writeahead.log.metrics.SimpleWalMetrics;
 import io.writeahead.log.models.SegmentFooter;
 import io.writeahead.log.models.SegmentHeader;
 import io.writeahead.log.models.SegmentMetadata;
@@ -23,23 +24,32 @@ public class SegmentMetadataRecovery {
 
     private static final Logger log = LoggerFactory.getLogger(SegmentMetadataRecovery.class);
     private final String logDir;
+    private final SimpleWalMetrics metrics;
 
-    public SegmentMetadataRecovery(String logDir) {
+    private static final long NANOSECONDS_PER_MILLISECOND = 1_000_000;
+
+    public SegmentMetadataRecovery(String logDir, SimpleWalMetrics metrics) {
         this.logDir = logDir;
+        this.metrics = metrics;
     }
     public WalMetadata recover() throws IOException {
+        long recoveryStartNs = System.nanoTime();
         List<SegmentMetadata> segments = new ArrayList<>();
         long maxSequenceFromHeaders = 0;
 
         File logDirectory = new File(logDir);
 
         if(!logDirectory.exists()){
+            long recoveryDurationMs = (System.nanoTime() - recoveryStartNs) / NANOSECONDS_PER_MILLISECOND;
+            metrics.recordRecoveryCompleted(recoveryDurationMs, 0, 0);
             log.info("Log directory does not exist: {}", logDir);
             return new WalMetadata(null, segments, 1);
         }
 
         List<File> logFiles = FileUtils.listLogFiles(logDir);
         if(logFiles.isEmpty()) {
+            long recoveryDurationMs = (System.nanoTime() - recoveryStartNs) / NANOSECONDS_PER_MILLISECOND;
+            metrics.recordRecoveryCompleted(recoveryDurationMs, 0, 0);
             log.info("No segment found in: {}", logDir);
             return new WalMetadata(null, segments, 1);
         }
@@ -47,20 +57,23 @@ public class SegmentMetadataRecovery {
         for(File logFile : logFiles) {
             try {
                 SegmentMetadata segMeta = validateAndRecoverSegment(logFile);
-
-                if(segMeta != null) {
-                    segments.add(segMeta);
-                    maxSequenceFromHeaders = Math.max(maxSequenceFromHeaders, segMeta.sequenceNumber());
-                    log.debug("Recovered segment: {} (seq: {}, entries: {})",
-                            logFile.getName(), segMeta.sequenceNumber(), segMeta.entryCount());
-                }
+                segments.add(segMeta);
+                maxSequenceFromHeaders = Math.max(maxSequenceFromHeaders, segMeta.sequenceNumber());
+                log.debug("Recovered segment: {} (seq: {}, entries: {})",
+                        logFile.getName(), segMeta.sequenceNumber(), segMeta.entryCount());
             } catch (CorruptionException ex) {
+                metrics.recordSegmentCorruption();
+                metrics.recordCorruptionType(ex.corruptionType());
             log.error("Corruption in segment {}: {} (offset: {}, type: {})",
                     logFile.getName(), ex.getMessage(), ex.byteOffset(), ex.corruptionType());
         } catch (IOException ex) {
             log.error("IO error recovering segment {}: {}", logFile.getName(), ex.getMessage());
         }
         }
+
+        long recoveryDurationMs = (System.nanoTime() - recoveryStartNs) / NANOSECONDS_PER_MILLISECOND;
+        metrics.recordRecoveryCompleted(recoveryDurationMs, logFiles.size(), segments.size());
+
         String lastActiveSegment = segments.isEmpty() ? null : segments.getLast().filename();
         long nextSequence = maxSequenceFromHeaders + 1;
 

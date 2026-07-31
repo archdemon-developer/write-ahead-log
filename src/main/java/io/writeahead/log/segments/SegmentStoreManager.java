@@ -52,9 +52,9 @@ public class SegmentStoreManager implements SegmentStore {
     public SegmentStoreManager(WalConfiguration config) throws IOException {
         this.config = config;
 
-        SegmentMetadataRecovery metadataRecovery = new SegmentMetadataRecovery(config.logDir());
+        SegmentMetadataRecovery metadataRecovery = new SegmentMetadataRecovery(config.logDir(), metrics);
         this.lifecycleManager = new SegmentLifecycleManager(config.logDir());
-        this.segmentReader = new SegmentEntriesReader();
+        this.segmentReader = new SegmentEntriesReader(metrics);
 
         WalMetadata walMetadata = metadataRecovery.recover();
         this.segments = new ArrayList<>(walMetadata.segments());
@@ -221,6 +221,9 @@ public class SegmentStoreManager implements SegmentStore {
         this.currentMaxTimestamp = Long.MIN_VALUE;
 
         this.fsyncExecutor = FsyncExecutorFactory.create(config.fsyncStrategy(), fsyncRetryStrategy, currentStream);
+
+        metrics.recordSegmentRotation();
+        metrics.setSegmentCount(segments.size());
 
         log.info("Rotated segment: {} -> {}", currentSequenceNumber - 1, currentSequenceNumber);
     }

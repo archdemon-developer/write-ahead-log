@@ -2,6 +2,7 @@ package io.writeahead.log.segments;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import io.writeahead.log.metrics.SimpleWalMetrics;
 import io.writeahead.log.models.WalMetadata;
 
 import java.io.File;
@@ -43,7 +44,7 @@ public class SegmentMetadataRecoveryTest {
     @BeforeEach
     void setUp() throws IOException {
         tempLogDirectory = Files.createTempDirectory("segment-recovery-test-");
-        recoveryUnderTest = new SegmentMetadataRecovery(tempLogDirectory.toString());
+        recoveryUnderTest = new SegmentMetadataRecovery(tempLogDirectory.toString(), new SimpleWalMetrics());
         lifecycleManager = new SegmentLifecycleManager(tempLogDirectory.toString());
     }
 
@@ -203,7 +204,7 @@ public class SegmentMetadataRecoveryTest {
             allBytes[footerStart + 28] = (byte) ~allBytes[footerStart + 28];
             Files.write(segmentFile.toPath(), allBytes);
 
-            SegmentMetadataRecovery recoveryUnderTest = new SegmentMetadataRecovery(tempLogDirectory.toString());
+            SegmentMetadataRecovery recoveryUnderTest = new SegmentMetadataRecovery(tempLogDirectory.toString(), new SimpleWalMetrics());
             WalMetadata recoveredMetadata = recoveryUnderTest.recover();
 
             assertEquals(0, recoveredMetadata.segments().size());

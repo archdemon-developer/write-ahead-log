@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import io.writeahead.log.exceptions.CorruptionException;
 import io.writeahead.log.enums.CorruptionType;
+import io.writeahead.log.metrics.SimpleWalMetrics;
 import io.writeahead.log.models.LogEntry;
 import io.writeahead.log.serdes.EntrySerdes;
 import io.writeahead.log.utils.Crc32Utils;
@@ -28,7 +29,7 @@ public class SegmentEntriesReaderTest {
     private static final int EXPECTED_THREE_ENTRIES = 3;
     private static final int ZERO_ENTRIES = 0;
 
-    private final SegmentEntriesReader entriesReader = new SegmentEntriesReader();
+    private final SegmentEntriesReader entriesReader = new SegmentEntriesReader(new SimpleWalMetrics());
 
     @Test
     void readSingleEntryFromRegion() throws IOException {
