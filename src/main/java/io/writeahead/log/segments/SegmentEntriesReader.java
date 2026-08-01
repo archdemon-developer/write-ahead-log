@@ -8,67 +8,67 @@ import io.writeahead.log.models.LogEntry;
 import io.writeahead.log.serdes.EntrySerdes;
 import io.writeahead.log.utils.Crc32Utils;
 import io.writeahead.log.utils.WalErrorClassifier;
-
 import java.io.*;
 import java.util.ArrayList;
 import java.util.List;
 
 public class SegmentEntriesReader {
 
-    private final Logger log = LoggerFactory.getLogger(SegmentEntriesReader.class);
+  private final Logger log = LoggerFactory.getLogger(SegmentEntriesReader.class);
 
-    private final SimpleWalMetrics metrics;
+  private final SimpleWalMetrics metrics;
 
-    public SegmentEntriesReader(SimpleWalMetrics metrics) {
-        this.metrics = metrics;
-    }
+  public SegmentEntriesReader(SimpleWalMetrics metrics) {
+    this.metrics = metrics;
+  }
 
-    public SegmentReadResult readEntriesFromRegion(byte[] entryRegionBytes) throws IOException {
-        List<LogEntry> logEntries = new ArrayList<>();
-        int entriesRead = 0;
-        boolean hasCorruption = false;
-        int corruptionAtEntry = -1;
+  public SegmentReadResult readEntriesFromRegion(byte[] entryRegionBytes) throws IOException {
+    List<LogEntry> logEntries = new ArrayList<>();
+    int entriesRead = 0;
+    boolean hasCorruption = false;
+    int corruptionAtEntry = -1;
 
-        try (ByteArrayInputStream bais = new ByteArrayInputStream(entryRegionBytes);
-             DataInputStream dis = new DataInputStream(bais)) {
-            while (bais.available() > 0) {
-                try {
-                    Object[] entry = EntrySerdes.deserializeEntry(dis);
-                    long timestamp = (long) entry[0];
-                    int size = (int) entry[1];
-                    byte[] data = (byte[]) entry[2];
-                    long storedCrc = (long) entry[3];
+    try (ByteArrayInputStream bais = new ByteArrayInputStream(entryRegionBytes);
+        DataInputStream dis = new DataInputStream(bais)) {
+      while (bais.available() > 0) {
+        try {
+          Object[] entry = EntrySerdes.deserializeEntry(dis);
+          long timestamp = (long) entry[0];
+          int size = (int) entry[1];
+          byte[] data = (byte[]) entry[2];
+          long storedCrc = (long) entry[3];
 
-                    long computedCrc = Crc32Utils.computeEntryCrc(timestamp, size, data);
+          long computedCrc = Crc32Utils.computeEntryCrc(timestamp, size, data);
 
-                    if (computedCrc != storedCrc) {
-                        metrics.recordCorruptedEntry();
-                        metrics.recordCorruptionType(CorruptionType.ENTRY_CRC_MISMATCH);
-                        throw WalErrorClassifier.classifyCorruption(
-                                "unknown-segment", 0, CorruptionType.ENTRY_CRC_MISMATCH,
-                                computedCrc, storedCrc, "Entry CRC mismatch at entry " + entriesRead);
-                    }
+          if (computedCrc != storedCrc) {
+            metrics.recordCorruptedEntry();
+            metrics.recordCorruptionType(CorruptionType.ENTRY_CRC_MISMATCH);
+            throw WalErrorClassifier.classifyCorruption(
+                "unknown-segment",
+                0,
+                CorruptionType.ENTRY_CRC_MISMATCH,
+                computedCrc,
+                storedCrc,
+                "Entry CRC mismatch at entry " + entriesRead);
+          }
 
-                    logEntries.add(new LogEntry(size, data, timestamp));
-                    entriesRead++;
-                } catch (EOFException ex) {
-                    log.debug("Reached end of entry region");
-                    break;
-                }
-            }
+          logEntries.add(new LogEntry(size, data, timestamp));
+          entriesRead++;
+        } catch (EOFException ex) {
+          log.debug("Reached end of entry region");
+          break;
         }
-
-        return new SegmentReadResult(logEntries, entriesRead, hasCorruption, corruptionAtEntry);
+      }
     }
 
-    public record SegmentReadResult(
-            List<LogEntry> entries,
-            int entriesRead,
-            boolean hasCorruption,
-            int corruptionAtEntry) {
+    return new SegmentReadResult(logEntries, entriesRead, hasCorruption, corruptionAtEntry);
+  }
 
-        public boolean isValid() {
-            return !hasCorruption;
-        }
+  public record SegmentReadResult(
+      List<LogEntry> entries, int entriesRead, boolean hasCorruption, int corruptionAtEntry) {
+
+    public boolean isValid() {
+      return !hasCorruption;
     }
+  }
 }

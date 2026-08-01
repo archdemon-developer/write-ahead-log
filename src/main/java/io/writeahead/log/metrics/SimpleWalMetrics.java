@@ -2,10 +2,8 @@ package io.writeahead.log.metrics;
 
 import io.writeahead.log.enums.CorruptionType;
 import io.writeahead.log.enums.ErrorContext;
-
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-
 import java.util.concurrent.atomic.AtomicLong;
 
 public class SimpleWalMetrics implements WalMetrics, WalPerformanceMetrics {
@@ -142,7 +140,8 @@ public class SimpleWalMetrics implements WalMetrics, WalPerformanceMetrics {
     corruptionTypeCounts.merge(type.name(), 1L, Long::sum);
   }
 
-  public void recordRecoveryCompleted(long durationMs, long segmentsScanned, long segmentsRecovered) {
+  public void recordRecoveryCompleted(
+      long durationMs, long segmentsScanned, long segmentsRecovered) {
     recoveryCount.incrementAndGet();
     totalRecoveryTimeMs.addAndGet(durationMs);
     lastRecoverySegmentsScanned.set(segmentsScanned);

@@ -80,7 +80,8 @@ public record WalConfiguration(
         throw new IllegalArgumentException("retryBackoffMs must be > 0, got: " + retryBackoffMs);
       }
       if (retryBackoffMultiplier <= 0) {
-        throw new IllegalArgumentException("retryBackoffMultiplier must be > 0, got: " + retryBackoffMultiplier);
+        throw new IllegalArgumentException(
+            "retryBackoffMultiplier must be > 0, got: " + retryBackoffMultiplier);
       }
 
       return new WalConfiguration(

@@ -1,9 +1,6 @@
 package io.writeahead.log.utils;
 
 import io.writeahead.log.serdes.EntrySerdes;
-
-import java.io.ByteArrayOutputStream;
-import java.io.DataOutputStream;
 import java.io.IOException;
 import java.util.zip.CRC32;
 

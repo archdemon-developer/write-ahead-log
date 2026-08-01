@@ -1,22 +1,25 @@
 package io.writeahead.log.segments;
 
 import io.writeahead.log.metrics.SimpleWalMetrics;
+import io.writeahead.log.models.AppendResult;
+import io.writeahead.log.models.CloseResult;
 import io.writeahead.log.models.LogEntry;
+import io.writeahead.log.models.TruncateResult;
 import java.io.IOException;
 import java.util.List;
 
 public interface SegmentStore {
-  void append(LogEntry entry) throws IOException;
+  AppendResult append(LogEntry entry) throws IOException;
 
-  void writeBatch() throws IOException;
+  AppendResult writeBatch() throws IOException;
 
   List<LogEntry> readAllSegments() throws IOException;
 
   List<LogEntry> readAllAfterTimestamp(long timestamp) throws IOException;
 
-  void truncateBeforeTimestamp(long timestamp) throws IOException;
+  TruncateResult truncateBeforeTimestamp(long timestamp) throws IOException;
 
   SimpleWalMetrics getMetrics();
 
-  void close() throws IOException;
+  CloseResult close() throws IOException;
 }

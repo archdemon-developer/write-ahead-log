@@ -1,21 +1,21 @@
-//package io.writeahead.log;
+// package io.writeahead.log;
 //
-//import io.writeahead.log.concurrency.LockableOperation;
-//import io.writeahead.log.logging.Logger;
-//import io.writeahead.log.logging.LoggerFactory;
-//import io.writeahead.log.metrics.WalMetrics;
-//import io.writeahead.log.metrics.WalPerformanceMetrics;
-//import io.writeahead.log.models.LogEntry;
-//import io.writeahead.log.models.WalConfiguration;
-//import io.writeahead.log.segments.SegmentStoreManager;
-//import io.writeahead.log.segments.SegmentStore;
+// import io.writeahead.log.concurrency.LockableOperation;
+// import io.writeahead.log.logging.Logger;
+// import io.writeahead.log.logging.LoggerFactory;
+// import io.writeahead.log.metrics.WalMetrics;
+// import io.writeahead.log.metrics.WalPerformanceMetrics;
+// import io.writeahead.log.models.LogEntry;
+// import io.writeahead.log.models.WalConfiguration;
+// import io.writeahead.log.segments.SegmentStoreManager;
+// import io.writeahead.log.segments.SegmentStore;
 //
-//import java.io.IOException;
-//import java.util.ArrayList;
-//import java.util.Collections;
-//import java.util.List;
+// import java.io.IOException;
+// import java.util.ArrayList;
+// import java.util.Collections;
+// import java.util.List;
 //
-//public class WriteAheadLog {
+// public class WriteAheadLog {
 //
 //  private final int batchSize;
 //  private final List<LogEntry> batch;
@@ -30,7 +30,8 @@
 //    this.segmentStore = new SegmentStoreManager(walConfiguration);
 //    this.appendLock = new LockableOperation();
 //
-//    log.info("WriteAheadLog initialized: batchSize={}, logDir={}", batchSize, walConfiguration.logDir());
+//    log.info("WriteAheadLog initialized: batchSize={}, logDir={}", batchSize,
+// walConfiguration.logDir());
 //  }
 //
 //  public void append(LogEntry entry) throws IOException {
@@ -109,4 +110,4 @@
 //    public WalPerformanceMetrics getPerformanceMetrics() {
 //        return segmentStore.getMetrics();
 //    }
-//}
+// }

@@ -1,7 +1,6 @@
 package io.writeahead.log.utils;
 
 import io.writeahead.log.models.FileStream;
-
 import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.Path;

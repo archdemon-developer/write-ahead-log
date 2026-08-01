@@ -5,24 +5,22 @@ import io.writeahead.log.enums.ErrorRecoveryAction;
 
 public class TransientIOException extends WalException {
 
-    public TransientIOException(String message,
-                                ErrorContext context,
-                                String operationDesc) {
-        super(message, context, ErrorRecoveryAction.RETRY_WITH_BACKOFF, operationDesc);
-    }
+  public TransientIOException(String message, ErrorContext context, String operationDesc) {
+    super(message, context, ErrorRecoveryAction.RETRY_WITH_BACKOFF, operationDesc);
+  }
 
-    @Override
-    public boolean isTransient() {
-        return true;
-    }
+  @Override
+  public boolean isTransient() {
+    return true;
+  }
 
-    @Override
-    public boolean indicatesDataLoss() {
-        return false;
-    }
+  @Override
+  public boolean indicatesDataLoss() {
+    return false;
+  }
 
-    @Override
-    public String errorTypeCode() {
-        return "TRANSIENT_IO";
-    }
+  @Override
+  public String errorTypeCode() {
+    return "TRANSIENT_IO";
+  }
 }

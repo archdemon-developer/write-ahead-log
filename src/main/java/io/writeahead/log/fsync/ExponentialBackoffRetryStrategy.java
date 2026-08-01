@@ -5,7 +5,6 @@ import io.writeahead.log.logging.Logger;
 import io.writeahead.log.logging.LoggerFactory;
 import io.writeahead.log.metrics.SimpleWalMetrics;
 import io.writeahead.log.utils.WalErrorClassifier;
-
 import java.io.IOException;
 
 public class ExponentialBackoffRetryStrategy implements FsyncRetryStrategy {
@@ -18,7 +17,9 @@ public class ExponentialBackoffRetryStrategy implements FsyncRetryStrategy {
   private static final Logger log = LoggerFactory.getLogger(ExponentialBackoffRetryStrategy.class);
 
   public ExponentialBackoffRetryStrategy(
-      int maxRetries, long retryBackoffMs, double retryBackoffMultiplier,
+      int maxRetries,
+      long retryBackoffMs,
+      double retryBackoffMultiplier,
       SimpleWalMetrics metrics) {
     this.maxRetries = maxRetries;
     this.retryBackoffMs = retryBackoffMs;
@@ -49,8 +50,12 @@ public class ExponentialBackoffRetryStrategy implements FsyncRetryStrategy {
         if (walEx.isTransient() && attempt < maxRetries) {
           metrics.recordFsyncTransientFailure(walEx.context());
           long waitMs = (long) (retryBackoffMs * Math.pow(retryBackoffMultiplier, attempt));
-          log.warn("Fsync attempt {}/{} failed (transient), retrying in {}ms: {}",
-                  attempt + 1, maxRetries + 1, waitMs, ex.getMessage());
+          log.warn(
+              "Fsync attempt {}/{} failed (transient), retrying in {}ms: {}",
+              attempt + 1,
+              maxRetries + 1,
+              waitMs,
+              ex.getMessage());
           sleep(waitMs);
         } else {
           metrics.recordFsyncPermanentFailure(walEx.context());

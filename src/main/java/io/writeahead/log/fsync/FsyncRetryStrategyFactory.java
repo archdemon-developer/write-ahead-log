@@ -5,10 +5,12 @@ import io.writeahead.log.models.WalConfiguration;
 
 public class FsyncRetryStrategyFactory {
 
-  public static FsyncRetryStrategy create(WalConfiguration walConfiguration , SimpleWalMetrics metrics) {
+  public static FsyncRetryStrategy create(
+      WalConfiguration walConfiguration, SimpleWalMetrics metrics) {
     return new ExponentialBackoffRetryStrategy(
         walConfiguration.maxRetries(),
         walConfiguration.retryBackoffMs(),
-        walConfiguration.retryBackoffMultiplier(), metrics);
+        walConfiguration.retryBackoffMultiplier(),
+        metrics);
   }
 }
