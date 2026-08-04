@@ -1,6 +1,7 @@
 package io.writeahead.log.models;
 
 import io.writeahead.log.enums.FsyncStrategy;
+import io.writeahead.log.enums.RotationPolicyType;
 
 public record WalConfiguration(
     int batchSize,
@@ -10,13 +11,15 @@ public record WalConfiguration(
     String timestampFormat,
     int maxRetries,
     long retryBackoffMs,
-    double retryBackoffMultiplier) {
+    double retryBackoffMultiplier,
+    RotationPolicyType rotationPolicyType) {
 
   public static class Builder {
     private int batchSize = 10;
     private long maxSegmentSize = 10 * 1024 * 1024;
     private String logDir;
     private FsyncStrategy fsyncStrategy = FsyncStrategy.FSYNC_EVERY_BATCH;
+    private RotationPolicyType rotationPolicyType = RotationPolicyType.SIZE_BASED;
     private String timestampFormat = "yyyy-MM-dd'T'HH:mm:ss.SSS";
     private int maxRetries = 3;
     private long retryBackoffMs = 10;
@@ -24,6 +27,11 @@ public record WalConfiguration(
 
     public Builder batchSize(int size) {
       this.batchSize = size;
+      return this;
+    }
+
+    public Builder rotationPolicyType(RotationPolicyType type) {
+      this.rotationPolicyType = type;
       return this;
     }
 
@@ -92,7 +100,8 @@ public record WalConfiguration(
           timestampFormat,
           maxRetries,
           retryBackoffMs,
-          retryBackoffMultiplier);
+          retryBackoffMultiplier,
+          rotationPolicyType);
     }
   }
 }

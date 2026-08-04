@@ -3,6 +3,7 @@ package io.writeahead.log.segments;
 import io.writeahead.log.logging.Logger;
 import io.writeahead.log.logging.LoggerFactory;
 import io.writeahead.log.models.FileStream;
+import io.writeahead.log.models.SegmentFinalizationData;
 import io.writeahead.log.models.SegmentFooter;
 import io.writeahead.log.models.SegmentHeader;
 import io.writeahead.log.utils.FileUtils;
@@ -42,11 +43,14 @@ public class SegmentLifecycleManager {
     }
   }
 
-  public void finalizeSegment(
-      FileStream currentStream, int entryCount, long minTimestamp, long maxTimestamp)
+  public void finalizeSegment(FileStream currentStream, SegmentFinalizationData finalizationData)
       throws IOException {
     try {
-      SegmentFooter footer = SegmentFooter.create(entryCount, minTimestamp, maxTimestamp);
+      SegmentFooter footer =
+          SegmentFooter.create(
+              finalizationData.entryCount(),
+              finalizationData.minTimestamp(),
+              finalizationData.maxTimestamp());
       byte[] footerBytes = footer.toBytes();
       try {
         FileUtils.writeToStream(currentStream, footerBytes);
@@ -59,21 +63,10 @@ public class SegmentLifecycleManager {
         throw WalErrorClassifier.classifyIOException(ex, "fsync footer to disk");
       }
     } finally {
-      FileUtils.closeStream(currentStream); // ALWAYS closes
+      FileUtils.closeStream(currentStream);
     }
 
-    log.debug(
-        "Finalized segment: entries={}, minTs={}, maxTs={}",
-        entryCount,
-        minTimestamp,
-        maxTimestamp);
-  }
-
-  public void closeSegment(
-      FileStream currentStream, int entryCount, long minTimestamp, long maxTimestamp)
-      throws IOException {
-    finalizeSegment(currentStream, entryCount, minTimestamp, maxTimestamp);
-    log.info("Closed segment: entries={}", entryCount);
+    log.debug("Finalized segment: {}", finalizationData);
   }
 
   public static String generateSegmentFilename(long sequence) {

@@ -59,12 +59,10 @@ public record CloseResult(
       }
     }
 
-    // Can't have unflushed entries on successful close
     if (hasUnflushedEntries && success) {
       throw new IllegalArgumentException("If hasUnflushedEntries=true, success must be false");
     }
 
-    // If success=true, must be clean (no errors, no pending data, no corruption)
     if (success) {
       if (errorMessage != null) {
         throw new IllegalArgumentException("If success=true, errorMessage must be null");
@@ -77,7 +75,6 @@ public record CloseResult(
       }
     }
 
-    // If success=false, must have error message
     if (!success) {
       if (errorMessage == null || errorMessage.isEmpty()) {
         throw new IllegalArgumentException(

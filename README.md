@@ -1,171 +1,134 @@
 # Write-Ahead Log (WAL)
 
-[![codecov](https://codecov.io/github/archdemon-developer/write-ahead-log/graph/badge.svg?token=68IURPEYKH)](https://codecov.io/github/archdemon-developer/write-ahead-log)
+A single-node write-ahead log implementation in pure Java. Built from scratch to understand durability, atomicity, and crash recovery in database systems.
 
-A production-grade Write-Ahead Log implementation in pure Java. **Zero external dependencies.** Achieves **96K+ ops/sec** throughput with concurrent writes, automatic crash recovery, and structured observability—designed to learn from and mirror real systems like RocksDB and PostgreSQL.
+**Status:** ✅ Phases 1-6.75 Complete | 🔧 Refactoring in Progress
 
-## Features
+## What This Is
 
-- 💾 **Durable writes** with fsync guarantees (atomic metadata via temp-file + rename)
-- ⚡ **96K+ ops/sec throughput** with batched I/O (batch size configurable)
-- 🧵 **Thread-safe concurrent writes** (ReadWriteLock, no data loss under concurrent load)
-- 🔄 **Automatic segment rotation** (configurable size, default 10MB)
-- 🛡️ **CRC32 checksums** detect bit corruption (fail-hard semantics)
-- 📊 **Timestamp-based queries** enable snapshot recovery and time-range reads
-- 🔐 **Crash recovery** verified via integration tests (power-loss simulation)
-- 📋 **Structured logging** (custom zero-dependency logger with timestamps + thread names)
-- 🏗️ **Extensible architecture** (pluggable interfaces, dependency injection, configuration-driven)
-- ✅ **90% test coverage** (150+ tests, stress tests included)
+A durable log that:
+- Guarantees atomic writes with CRC32 validation
+- Recovers deterministically from crashes
+- Handles concurrent access safely
+- Provides time-based queries
+
+## What This Is NOT
+
+- Not a distributed system (single-node only)
+- Not production-ready (a learning artifact)
+- Not a replacement for Kafka/RocksDB
+- Not a full database (just the durability layer)
 
 ## Quick Start
 
-### Prerequisites
-- Java 21+
-- Maven 3.6.3+
-
-### Build & Test
-
 ```bash
-# Compile
+# Build
 mvn clean compile
-
-# Run all tests (excludes stress tests to spare SSD)
-mvn clean test -Dtest=!LoadStressTest,!ConcurrentWriteReadTest
-
-# Run with coverage report
-mvn clean verify
-open target/site/jacoco/index.html
 ```
-
-## Usage
 
 ```java
-// Create WAL with configuration
 WalConfiguration config = new WalConfiguration.Builder()
-    .batchSize(10)
-    .segmentSizeBytes(10 * 1024 * 1024)
-    .logDir("/var/log/wal")
-    .fsyncStrategy(FsyncStrategy.FSYNC_EVERY_BATCH)
-    .build();
+        .batchSize(50)
+        .maxSegmentSize(10 * 1024 * 1024)
+        .logDir("/var/log/wal")
+        .fsyncStrategy(FsyncStrategy.FSYNC_EVERY_BATCH)
+        .build();
+
 WriteAheadLog wal = new WriteAheadLog(config);
-
-// Append entries (buffered in memory)
-byte[] data = "important data".getBytes();
 LogEntry entry = new LogEntry(data.length, data, System.currentTimeMillis());
-wal.append(entry);  // Non-blocking, returns immediately
 
-// Flush remaining batch on close
-wal.close();  // Blocks until all data fsynced
+wal.append(entry);           // Buffered in memory
+wal.close();                 // Flushed to disk with fsync
 
-// Recover from crash
+// After crash recovery...
 WriteAheadLog wal2 = new WriteAheadLog(config);
-List<LogEntry> recovered = wal2.readFromDisk();  // All entries safe on disk
+List<LogEntry> recovered = wal2.readAllSegments();  // All safe on disk
 ```
-
-## Performance
-
-**GitHub Actions (Cloud Hardware, Better SSD):**
-- Light Load (2 threads, 500 entries): **32K ops/sec**
-- Heavy Load (10 threads, 2K entries): **40K ops/sec**
-- Extreme Load (20 threads, 5K entries): **31K ops/sec**
-- Batch Size 100 (optimal): **219K ops/sec** (write-only, no fsync)
-
-**Throughput with Fsync (realistic):**
-- Batch size 10: ~15K ops/sec
-- Batch size 50: ~96K ops/sec (sweet spot)
-
-*Note: Local SSD throughput limited by hardware fsync latency (~154ms). Cloud hardware achieves better results.*
 
 ## Architecture
 
 ```
-Application
+WriteAheadLog (thread-safe batching with ReadWriteLock)
     ↓
-WriteAheadLog (batching, locks)
+SegmentStore [6 focused interfaces]
     ↓
-SegmentStore [Interface]
+SegmentStoreManager (orchestrates rotation, state tracking)
+    ├─ SegmentLifecycleManager
+    ├─ SegmentEntriesReader
+    ├─ SegmentMetadataRecovery
+    └─ SegmentCollection
     ↓
-SegmentManager (rotation, queries)
-    ↓
-MetadataStore [Interface]
-    ↓
-MetaDataManager (atomic persistence)
-    ↓
-FileUtils (raw I/O, fsync)
-    ↓
-Disk Files (.log segments + .meta)
+Disk (.log segments with embedded metadata)
 ```
 
-**Design Principles:**
-- **Extensibility First:** Configuration + interfaces enable Phase 8 (replication) without refactoring
-- **Fail-Hard Philosophy:** Corruption detected = exception thrown (no silent data loss)
-- **Single Responsibility:** Each layer has one job (WriteAheadLog → SegmentManager → MetaDataManager → FileUtils)
-- **Zero Dependencies:** Pure Java, no external libraries (including logging)
+## Key Design Decisions
 
-## Configuration
+| Decision | Why | Reference |
+|----------|-----|-----------|
+| Segment-based | Safe truncation, predictable file sizes | RocksDB, Kafka |
+| Embedded metadata | Atomic with data, no divergence on crash | PostgreSQL XLOG |
+| CRC32 per entry | ~99.99% corruption detection | PostgreSQL, RocksDB |
+| Batching | 6-10x throughput vs single fsync | RocksDB, Kafka |
+| ReadWriteLock | Prepared for future replication | Kafka broker model |
+| State objects | Rich encapsulation, extensibility | Modern API design |
+| Pluggable filters | Custom logic, segment optimization | Kafka filters |
+| Interface segregation | Clients depend only on needed methods | SOLID ISP |
 
-```java
-WalConfiguration config = new WalConfiguration.Builder()
-    .batchSize(50)                              // Entries per batch (default: 10)
-    .segmentSizeBytes(100 * 1024 * 1024)        // Rotate at 100MB (default: 10MB)
-    .logDir("/data/wal")                        // Directory for .log + .meta files
-    .fsyncStrategy(FsyncStrategy.FSYNC_EVERY_BATCH)  // Durability level
-    .timestampFormat("yyyy-MM-dd'T'HH:mm:ss.SSS")   // Segment naming format
-    .build();
+## Current State
 
-// Adjust log level at runtime
-LoggerFactory.setLogLevel(LogLevel.WARN);  // DEBUG, INFO, WARN, ERROR
-```
+- ✅ Core durability layer complete
+- ✅ Thread-safe concurrent writes
+- ✅ Crash recovery deterministic
+- ✅ Architecture refactored for extensibility
+- 🔧 Tests being rewritten (after package segregation + refactoring)
 
-## Design Decisions
+## Future Work
 
-| Decision | Rationale |
-|----------|-----------|
-| **Segments** | Safe truncation, predictable file sizes, parallel reads (RocksDB pattern) |
-| **JSON metadata** | Human-readable, debuggable, atomic rename prevents corruption |
-| **CRC32** | Fast (~1μs per entry), ~99.99% detection rate for bit corruption |
-| **Batching** | Amortizes expensive fsync calls (~6-10x throughput gain) |
-| **ReadWriteLock** | Supports concurrent reads (prepared for Phase 8 replication) |
-| **Custom logger** | Zero dependencies, structured output, configurable levels |
-| **Immutable LogEntry** | Thread-safe by design, enables defensive programming |
+### Phase 7: Refactoring & Testing (10-12 weeks)
 
-## Test Coverage
+**Package Segregation**
+- Organize by responsibility: config/, models/, segments/, fsync/, batch/, metrics/, etc.
 
-- **90% line coverage** (threshold enforced in CI)
-- **150+ test cases** across 7 test suites
-- **Crash recovery tests** (simulated power loss via JVM exit)
-- **Corruption detection tests** (bit-flip injection)
-- **Concurrent stress tests** (10-20 threads, 100K+ entries)
-- **Load benchmarks** (3 load profiles, throughput measurement)
+**Component Extraction**
+- Split SegmentStoreManager into focused classes (SegmentWriter, SegmentReader, SegmentTruncator)
 
-View coverage report:
-```bash
-mvn clean verify
-open target/site/jacoco/index.html
-```
+**Java 21 Practices**
+- Sealed exception hierarchy with pattern matching
+- Use records and modern idioms
 
-## Phases Completed
+**Comprehensive Testing**
+- Unit, integration, failure scenario, and stress tests
+- Rewritten test suite for new package structure
 
-| Phase | Feature | Status | Details |
-|-------|---------|--------|---------|
-| 1 | Append-only persistence | ✅ | Basic read/write, batch buffering |
-| 2 | Crash recovery | ✅ | Simulated power loss, EOFException handling |
-| 3 | Fsync durability | ✅ | Batched fsync, 10x throughput vs per-entry |
-| 4 | Segment rotation | ✅ | Auto-rotation, atomic metadata, timestamp tracking |
-| 5 | Corruption detection | ✅ | CRC32 checksums, fail-hard semantics |
-| 6 | Thread safety | ✅ | ReadWriteLock, concurrent append/read, stress tested |
-| 6.5 | Optimizations + Logging | ✅ | Removed cloning, single-lock design, structured logging |
+**Observability**
+- Structured logging
+- JMH benchmarks (throughput, latency, memory)
 
-**Next Phases:**
-- Phase 7: Resilience & Configuration (metadata recovery, retry policies, metrics)
-- Phase 8: Replication (Raft consensus, leader election, multi-node failover)
+**Bug Fixes**
+- Truncation atomicity
+- Schema versioning
+- Backpressure on batch buffer
+- Improved retry logic
 
-## Inspired By
+### Future: Replication (After Phase 7)
 
-- **RocksDB** — Segment-based WAL, async flushing
-- **PostgreSQL** — CRC32 corruption detection (XLOG), atomic metadata
-- **Kafka** — Timestamp-based indexing, segment rotation
+- Raft consensus
+- Multi-node failover
+- No refactoring of current architecture needed
+
+## Acknowledgements
+
+This implementation was inspired by and learned from:
+
+- **PostgreSQL** — XLOG design, CRC32 corruption detection, segment-based architecture, atomic metadata
+- **RocksDB** — SSTable WAL design, batching strategy, async flushing, pluggable compaction policies
+- **Apache Kafka** — Timestamp-based indexing, segment rotation, leader/follower architecture, segment-level optimizations
+- **MySQL InnoDB** — Redo log design, crash recovery mechanics, double-write buffer concepts
 
 ## License
 
 MIT
+
+---
+
+Built to understand: write-ahead logs, durability, atomicity, crash recovery, and concurrent system design.

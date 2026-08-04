@@ -6,11 +6,13 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
-public class SimpleWalMetrics implements WalMetrics, WalPerformanceMetrics {
+public class SimpleWalMetrics implements WalMetricsQuery, WalMetricsRecorder {
 
   private final AtomicLong entriesWritten = new AtomicLong(0);
   private final AtomicLong bytesWritten = new AtomicLong(0);
   private final AtomicLong segmentCount = new AtomicLong(0);
+  private final AtomicLong currentSegmentEntryCount = new AtomicLong(0);
+  private final AtomicLong currentSegmentByteCount = new AtomicLong(0);
   private final AtomicLong corruptedEntriesDetected = new AtomicLong(0);
   private final AtomicLong lastRotationTimeMs = new AtomicLong(0);
 
@@ -34,27 +36,50 @@ public class SimpleWalMetrics implements WalMetrics, WalPerformanceMetrics {
   private static final double BYTES_PER_MB = 1024.0 * 1024.0;
   private static final double MILLISECONDS_PER_SECOND = 1000.0;
 
-  public void recordEntryWritten(int size) {
+  @Override
+  public void recordEntryAppended(int entrySize) {
     entriesWritten.incrementAndGet();
-    bytesWritten.addAndGet(size);
+    bytesWritten.addAndGet(entrySize);
   }
 
+  public void recordEntryWritten(int size) {
+    recordEntryAppended(size);
+  }
+
+  @Override
   public void recordFsync(long latencyMs) {
     totalFsyncs.incrementAndGet();
     totalFsyncLatencyMs.addAndGet(latencyMs);
     lastFsyncTimeMs.set(System.currentTimeMillis());
   }
 
+  @Override
   public void recordCorruptedEntry() {
     corruptedEntriesDetected.incrementAndGet();
   }
 
+  @Override
   public void recordSegmentRotation() {
     lastRotationTimeMs.set(System.currentTimeMillis());
   }
 
-  public void setSegmentCount(long count) {
+  @Override
+  public void setCurrentSegmentEntryCount(long count) {
+    currentSegmentEntryCount.set(count);
+  }
+
+  @Override
+  public void setCurrentSegmentByteCount(long count) {
+    currentSegmentByteCount.set(count);
+  }
+
+  @Override
+  public void setTotalSegmentCount(long count) {
     segmentCount.set(count);
+  }
+
+  public void setSegmentCount(long count) {
+    setTotalSegmentCount(count);
   }
 
   @Override
@@ -120,26 +145,32 @@ public class SimpleWalMetrics implements WalMetrics, WalPerformanceMetrics {
     return lastFsyncTimeMs.get();
   }
 
+  @Override
   public void recordFsyncTransientFailure(ErrorContext context) {
     fsyncTransientErrorCounts.merge(context.name(), 1L, Long::sum);
   }
 
+  @Override
   public void recordFsyncPermanentFailure(ErrorContext context) {
     fsyncPermanentErrorCounts.merge(context.name(), 1L, Long::sum);
   }
 
+  @Override
   public void recordFsyncRetrySuccess(int attempts) {
     fsyncRetrySuccessCount.incrementAndGet();
   }
 
+  @Override
   public void recordSegmentCorruption() {
     segmentCorruptionCount.incrementAndGet();
   }
 
+  @Override
   public void recordCorruptionType(CorruptionType type) {
     corruptionTypeCounts.merge(type.name(), 1L, Long::sum);
   }
 
+  @Override
   public void recordRecoveryCompleted(
       long durationMs, long segmentsScanned, long segmentsRecovered) {
     recoveryCount.incrementAndGet();
@@ -186,5 +217,13 @@ public class SimpleWalMetrics implements WalMetrics, WalPerformanceMetrics {
 
   public long getFsyncRetrySuccessCount() {
     return fsyncRetrySuccessCount.get();
+  }
+
+  public long getCurrentSegmentEntryCount() {
+    return currentSegmentEntryCount.get();
+  }
+
+  public long getCurrentSegmentByteCount() {
+    return currentSegmentByteCount.get();
   }
 }

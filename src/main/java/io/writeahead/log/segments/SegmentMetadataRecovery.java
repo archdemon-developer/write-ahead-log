@@ -6,7 +6,7 @@ import io.writeahead.log.enums.RecoveryType;
 import io.writeahead.log.exceptions.CorruptionException;
 import io.writeahead.log.logging.Logger;
 import io.writeahead.log.logging.LoggerFactory;
-import io.writeahead.log.metrics.SimpleWalMetrics;
+import io.writeahead.log.metrics.WalMetricsRecorder;
 import io.writeahead.log.models.SegmentFooter;
 import io.writeahead.log.models.SegmentHeader;
 import io.writeahead.log.models.SegmentMetadata;
@@ -22,11 +22,11 @@ public class SegmentMetadataRecovery {
 
   private static final Logger log = LoggerFactory.getLogger(SegmentMetadataRecovery.class);
   private final String logDir;
-  private final SimpleWalMetrics metrics;
+  private final WalMetricsRecorder metrics;
 
   private static final long NANOSECONDS_PER_MILLISECOND = 1_000_000;
 
-  public SegmentMetadataRecovery(String logDir, SimpleWalMetrics metrics) {
+  public SegmentMetadataRecovery(String logDir, WalMetricsRecorder metrics) {
     this.logDir = logDir;
     this.metrics = metrics;
   }
@@ -104,16 +104,6 @@ public class SegmentMetadataRecovery {
     byte[] headerBytes = FileUtils.readBytes(segmentFile, 0, WalConstants.SEGMENT_HEADER_SIZE);
     SegmentHeader header = SegmentHeader.fromBytes(headerBytes);
 
-    if (!header.isValid()) {
-      throw WalErrorClassifier.classifyCorruption(
-          segmentFile.getName(),
-          0,
-          CorruptionType.HEADER_CRC_MISMATCH,
-          header.computedChecksum(),
-          header.checksum(),
-          "Header CRC validation failed");
-    }
-
     if (header.magic() != (byte) 0xAA) {
       throw WalErrorClassifier.classifyCorruption(
           segmentFile.getName(),
@@ -124,12 +114,33 @@ public class SegmentMetadataRecovery {
           "Header magic byte mismatch");
     }
 
+    if (!header.isValid()) {
+      throw WalErrorClassifier.classifyCorruption(
+          segmentFile.getName(),
+          0,
+          CorruptionType.HEADER_CRC_MISMATCH,
+          header.computedChecksum(),
+          header.checksum(),
+          "Header CRC validation failed");
+    }
+
     byte[] footerBytes =
         FileUtils.readBytes(
             segmentFile,
             fileSize - WalConstants.SEGMENT_FOOTER_SIZE,
             WalConstants.SEGMENT_FOOTER_SIZE);
     SegmentFooter footer = SegmentFooter.fromBytes(footerBytes);
+
+    if (footer.completeMarker() != 0xDEADBEEFL) {
+      throw WalErrorClassifier.classifyCorruption(
+          segmentFile.getName(),
+          fileSize - WalConstants.SEGMENT_FOOTER_SIZE,
+          CorruptionType.INVALID_FOOTER_MARKER,
+          footer.completeMarker(),
+          0xDEADBEEFL,
+          "Footer complete marker is not 0xDEADBEEF, got "
+              + String.format("0x%08X", footer.completeMarker()));
+    }
 
     if (!footer.isValid()) {
       throw WalErrorClassifier.classifyCorruption(

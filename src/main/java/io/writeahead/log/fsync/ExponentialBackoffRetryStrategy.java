@@ -3,7 +3,7 @@ package io.writeahead.log.fsync;
 import io.writeahead.log.exceptions.WalException;
 import io.writeahead.log.logging.Logger;
 import io.writeahead.log.logging.LoggerFactory;
-import io.writeahead.log.metrics.SimpleWalMetrics;
+import io.writeahead.log.metrics.WalMetricsRecorder;
 import io.writeahead.log.utils.WalErrorClassifier;
 import java.io.IOException;
 
@@ -13,14 +13,14 @@ public class ExponentialBackoffRetryStrategy implements FsyncRetryStrategy {
   private final long retryBackoffMs;
   private final double retryBackoffMultiplier;
 
-  private final SimpleWalMetrics metrics;
+  private final WalMetricsRecorder metrics;
   private static final Logger log = LoggerFactory.getLogger(ExponentialBackoffRetryStrategy.class);
 
   public ExponentialBackoffRetryStrategy(
       int maxRetries,
       long retryBackoffMs,
       double retryBackoffMultiplier,
-      SimpleWalMetrics metrics) {
+      WalMetricsRecorder metrics) {
     this.maxRetries = maxRetries;
     this.retryBackoffMs = retryBackoffMs;
     this.retryBackoffMultiplier = retryBackoffMultiplier;
@@ -57,7 +57,9 @@ public class ExponentialBackoffRetryStrategy implements FsyncRetryStrategy {
               waitMs,
               ex.getMessage());
           sleep(waitMs);
+          lastException = ex;
         } else {
+          lastException = ex;
           metrics.recordFsyncPermanentFailure(walEx.context());
           throw walEx;
         }

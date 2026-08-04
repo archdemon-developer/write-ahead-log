@@ -1,7 +1,7 @@
 package io.writeahead.log.segments;
 
 import io.writeahead.log.constants.WalConstants;
-import io.writeahead.log.exceptions.CorruptionException;
+import io.writeahead.log.enums.CorruptionType;
 import io.writeahead.log.fsync.FsyncExecutor;
 import io.writeahead.log.fsync.FsyncExecutorFactory;
 import io.writeahead.log.fsync.FsyncRetryStrategy;
@@ -9,6 +9,8 @@ import io.writeahead.log.fsync.FsyncRetryStrategyFactory;
 import io.writeahead.log.logging.Logger;
 import io.writeahead.log.logging.LoggerFactory;
 import io.writeahead.log.metrics.SimpleWalMetrics;
+import io.writeahead.log.metrics.WalMetricsQuery;
+import io.writeahead.log.metrics.WalMetricsRecorder;
 import io.writeahead.log.models.*;
 import io.writeahead.log.serdes.EntrySerdes;
 import io.writeahead.log.utils.Crc32Utils;
@@ -27,7 +29,7 @@ public class SegmentStoreManager implements SegmentStore {
   private final SegmentEntriesReader segmentReader;
   private final WalConfiguration config;
 
-  private final List<SegmentMetadata> segments;
+  private final SegmentCollection segmentCollection;
   private long nextSegmentSequence;
 
   private long currentSequenceNumber;
@@ -36,16 +38,20 @@ public class SegmentStoreManager implements SegmentStore {
   private int currentEntryCount;
   private long currentMinTimestamp;
   private long currentMaxTimestamp;
+  private long currentSegmentCreatedAt;
 
-  private final List<LogEntry> batch;
+  private final BatchBuffer batchBuffer;
   private FsyncExecutor fsyncExecutor;
   private final FsyncRetryStrategy fsyncRetryStrategy;
-  private final SimpleWalMetrics metrics = new SimpleWalMetrics();
+  private final WalMetricsRecorder metrics;
+  private final RotationPolicy rotationPolicy;
 
   private boolean isOpen;
 
   public SegmentStoreManager(WalConfiguration config) throws IOException {
     this.config = config;
+
+    this.metrics = new SimpleWalMetrics();
 
     SegmentMetadataRecovery metadataRecovery =
         new SegmentMetadataRecovery(config.logDir(), metrics);
@@ -53,17 +59,22 @@ public class SegmentStoreManager implements SegmentStore {
     this.segmentReader = new SegmentEntriesReader(metrics);
 
     WalMetadata walMetadata = metadataRecovery.recover();
-    this.segments = new ArrayList<>(walMetadata.segments());
+    this.segmentCollection = new SegmentCollection();
+    for (SegmentMetadata metadata : walMetadata.segments()) {
+      segmentCollection.add(metadata);
+    }
     this.nextSegmentSequence = walMetadata.nextSequence();
 
     this.currentSequenceNumber = nextSegmentSequence++;
     this.currentStream = lifecycleManager.createNewSegment(currentSequenceNumber);
-    this.currentStreamSize = 48;
+    this.currentStreamSize = WalConstants.SEGMENT_HEADER_SIZE;
     this.currentEntryCount = 0;
     this.currentMinTimestamp = Long.MAX_VALUE;
     this.currentMaxTimestamp = Long.MIN_VALUE;
+    this.currentSegmentCreatedAt = System.currentTimeMillis();
 
-    this.batch = new ArrayList<>();
+    this.batchBuffer = new BatchBuffer();
+    this.rotationPolicy = RotationPolicyFactory.create(config.rotationPolicyType());
     this.fsyncRetryStrategy = FsyncRetryStrategyFactory.create(config, metrics);
     this.fsyncExecutor =
         FsyncExecutorFactory.create(config.fsyncStrategy(), fsyncRetryStrategy, currentStream);
@@ -72,7 +83,7 @@ public class SegmentStoreManager implements SegmentStore {
 
     log.info(
         "SegmentStoreManager initialized: {} segments recovered, next sequence: {}",
-        segments.size(),
+        segmentCollection.size(),
         nextSegmentSequence);
   }
 
@@ -82,9 +93,11 @@ public class SegmentStoreManager implements SegmentStore {
           new IOException("SegmentStoreManager is closed"), "append to closed WAL");
     }
 
-    batch.add(entry);
+    batchBuffer.append(entry);
 
-    if (batch.size() >= config.batchSize()) {
+    BatchState batchState = batchBuffer.getBatchState();
+
+    if (batchState.wouldExceedCapacity(entry.data().length, config.batchSize())) {
       flushAndFsync();
       return AppendResult.successfulAppendWithFlush(
           currentSequenceNumber,
@@ -95,7 +108,7 @@ public class SegmentStoreManager implements SegmentStore {
     }
 
     return AppendResult.successfulAppendNoFlush(
-        batch.size(),
+        (int) batchState.entriesPendingInBatch(),
         currentSequenceNumber,
         currentEntryCount,
         currentStreamSize,
@@ -104,10 +117,10 @@ public class SegmentStoreManager implements SegmentStore {
   }
 
   public AppendResult writeBatch() throws IOException {
-    if (batch.isEmpty()) {
+    if (batchBuffer.isEmpty()) {
       log.debug("writeBatch called but batch is empty, nothing to flush");
       return AppendResult.successfulAppendNoFlush(
-          batch.size(),
+          0,
           currentSequenceNumber,
           currentEntryCount,
           currentStreamSize,
@@ -125,11 +138,14 @@ public class SegmentStoreManager implements SegmentStore {
   }
 
   private void flushAndFsync() throws IOException {
-    if (batch.isEmpty()) {
+    if (batchBuffer.isEmpty()) {
       return;
     }
 
-    for (LogEntry entry : batch) {
+    BatchFlushResult flushResult = batchBuffer.writeBatch();
+    List<LogEntry> entriesToWrite = flushResult.entries();
+
+    for (LogEntry entry : entriesToWrite) {
       long crc = Crc32Utils.computeEntryCrc(entry.timestamp(), entry.data().length, entry.data());
       byte[] entryBytes =
           EntrySerdes.serializeEntryWithCrc(
@@ -150,7 +166,7 @@ public class SegmentStoreManager implements SegmentStore {
       } catch (IOException ex) {
         throw WalErrorClassifier.classifyIOException(ex, "fsync after entry write");
       }
-      metrics.recordEntryWritten(entry.data().length);
+      metrics.recordEntryAppended(entry.data().length);
     }
 
     try {
@@ -158,17 +174,30 @@ public class SegmentStoreManager implements SegmentStore {
     } catch (IOException ex) {
       throw WalErrorClassifier.classifyIOException(ex, "fsync after batch complete");
     }
-    batch.clear();
 
-    if (currentStreamSize >= config.maxSegmentSize()) {
+    SegmentState currentSegState =
+        new SegmentState(
+            currentSequenceNumber,
+            currentEntryCount,
+            currentStreamSize,
+            currentMinTimestamp,
+            currentMaxTimestamp,
+            currentSegmentCreatedAt,
+            false);
+
+    RotationDecision rotationDecision =
+        segmentCollection.shouldRotate(rotationPolicy, currentSegState, config.maxSegmentSize());
+
+    if (rotationDecision.needsRotation()) {
       rotateSegment();
     }
   }
 
+  @Override
   public List<LogEntry> readAllSegments() throws IOException {
     List<LogEntry> allEntries = new ArrayList<>();
 
-    for (SegmentMetadata metadata : segments) {
+    for (SegmentMetadata metadata : segmentCollection.getSegments()) {
       File segmentFile = new File(config.logDir(), metadata.filename());
       if (!segmentFile.exists()) {
         log.warn("Segment file not found during read: {}", metadata.filename());
@@ -178,51 +207,165 @@ public class SegmentStoreManager implements SegmentStore {
       byte[] allBytes = FileUtils.readAllBytes(segmentFile);
       byte[] entryRegionBytes = extractEntryRegion(allBytes);
 
-      try {
-        SegmentEntriesReader.SegmentReadResult result =
-            segmentReader.readEntriesFromRegion(entryRegionBytes);
-        allEntries.addAll(result.entries());
-      } catch (CorruptionException ex) {
-        log.error("Corruption detected in segment {}: {}", metadata.filename(), ex.getMessage());
+      SegmentEntriesReader.SegmentReadResult result =
+          segmentReader.readEntriesFromRegion(entryRegionBytes);
+
+      allEntries.addAll(result.entries());
+
+      if (result.hasCorruption()) {
+        metrics.recordSegmentCorruption();
+        metrics.recordCorruptionType(CorruptionType.ENTRY_CRC_MISMATCH);
+
+        log.error(
+            "Corruption detected in segment {}: recovered {} entries, corruption at entry {}",
+            metadata.filename(),
+            result.entriesRead(),
+            result.corruptionAtEntry());
+
+        throw WalErrorClassifier.classifyCorruption(
+            metadata.filename(),
+            0,
+            CorruptionType.ENTRY_CRC_MISMATCH,
+            0,
+            0,
+            "Entry corruption at position "
+                + result.corruptionAtEntry()
+                + " (recovered "
+                + result.entriesRead()
+                + " entries before corruption)");
       }
     }
 
-    log.debug("Read {} entries from {} segments", allEntries.size(), segments.size());
+    log.debug("Read {} entries from {} segments", allEntries.size(), segmentCollection.size());
     return allEntries;
+  }
+
+  public List<LogEntry> readAllMatching(ReadFilter filter) throws IOException {
+    List<LogEntry> allEntries = new ArrayList<>();
+
+    for (SegmentMetadata metadata : segmentCollection.getSegments()) {
+
+      if (filter.canSkipSegment(metadata)) {
+        log.debug(
+            "Skipping segment {} ({}-{}): filter determined no entries match",
+            metadata.filename(),
+            metadata.minTimestamp(),
+            metadata.maxTimestamp());
+        continue;
+      }
+
+      File segmentFile = new File(config.logDir(), metadata.filename());
+      if (!segmentFile.exists()) {
+        log.warn("Segment file not found during read: {}", metadata.filename());
+        continue;
+      }
+
+      byte[] allBytes = FileUtils.readAllBytes(segmentFile);
+      byte[] entryRegionBytes = extractEntryRegion(allBytes);
+
+      SegmentEntriesReader.SegmentReadResult result =
+          segmentReader.readEntriesFromRegion(entryRegionBytes);
+
+      for (LogEntry entry : result.entries()) {
+        if (filter.matches(entry).isAccepted()) {
+          allEntries.add(entry);
+        }
+      }
+
+      if (result.hasCorruption()) {
+        metrics.recordSegmentCorruption();
+        metrics.recordCorruptionType(CorruptionType.ENTRY_CRC_MISMATCH);
+
+        log.error(
+            "Corruption detected in segment {}: recovered {} entries, corruption at entry {}",
+            metadata.filename(),
+            result.entriesRead(),
+            result.corruptionAtEntry());
+
+        throw WalErrorClassifier.classifyCorruption(
+            metadata.filename(),
+            0,
+            CorruptionType.ENTRY_CRC_MISMATCH,
+            0,
+            0,
+            "Entry corruption at position "
+                + result.corruptionAtEntry()
+                + " (recovered "
+                + result.entriesRead()
+                + " entries before corruption)");
+      }
+    }
+
+    log.debug(
+        "Read {} entries from {} segments using filter {}",
+        allEntries.size(),
+        segmentCollection.size(),
+        filter.name());
+    return allEntries;
+  }
+
+  public List<LogEntry> readAllAfterTimestamp(long timestamp) throws IOException {
+    return readAllMatching(new AfterTimestampFilter(timestamp));
+  }
+
+  @Override
+  public TruncateResult truncateAllMatching(TruncateFilter filter) throws IOException {
+    TruncateSegmentsResult segmentResult = segmentCollection.truncateMatching(filter);
+
+    if (!segmentResult.wereSegmentsRemoved()) {
+      return TruncateResult.nothingToTruncate(segmentResult.oldestRemainingSequence());
+    }
+
+    for (SegmentMetadata metadata : segmentResult.getSegmentsToDelete()) {
+      File segmentFile = new File(config.logDir(), metadata.filename());
+      try {
+        FileUtils.deleteFile(segmentFile);
+        log.info("Truncated segment: {}", metadata.filename());
+      } catch (IOException ex) {
+        String errorMsg =
+            "Failed to delete segment " + metadata.filename() + ": " + ex.getMessage();
+        return TruncateResult.truncationFailed(segmentResult.oldestRemainingSequence(), errorMsg);
+      }
+    }
+
+    return TruncateResult.successfulTruncate(
+        segmentResult.segmentsRemoved(), segmentResult.oldestRemainingSequence());
+  }
+
+  public TruncateResult truncateBeforeTimestamp(long timestamp) throws IOException {
+    return truncateAllMatching(new BeforeTimestampTruncateFilter(timestamp));
   }
 
   public CloseResult close() throws IOException {
     if (!isOpen) {
-      long oldestSeq = segments.isEmpty() ? 0 : segments.getFirst().sequenceNumber();
-      long newestSeq = segments.isEmpty() ? 0 : segments.getLast().sequenceNumber();
-      return CloseResult.successfulClose(segments.size(), oldestSeq, newestSeq, 0, 0);
+      long oldestSeq = segmentCollection.getOldestSequenceNumber();
+      long newestSeq = segmentCollection.getNewestSequenceNumber();
+      return CloseResult.successfulClose(segmentCollection.size(), oldestSeq, newestSeq, 0, 0);
     }
 
     try {
-      writeBatch();
+      if (!batchBuffer.isEmpty()) {
+        writeBatch();
+      }
     } catch (IOException ex) {
       isOpen = false;
-      long oldestSeq = segments.isEmpty() ? 0 : segments.getFirst().sequenceNumber();
-      long newestSeq =
-          segments.isEmpty()
-              ? currentSequenceNumber
-              : segments.getLast().sequenceNumber();
-
+      long oldestSeq = segmentCollection.getOldestSequenceNumber();
+      long newestSeq = segmentCollection.getNewestSequenceNumber();
       long totalEntries = 0;
       long totalBytes = 0;
-      for (SegmentMetadata seg : segments) {
+      for (SegmentMetadata seg : segmentCollection.getSegments()) {
         totalEntries += seg.entryCount();
         totalBytes += seg.fileSize();
       }
-
       String errorMsg = "Failed to flush batch before close: " + ex.getMessage();
       return CloseResult.closeWithUnflushedEntries(
-          segments.size() + 1, oldestSeq, newestSeq, totalEntries, totalBytes, errorMsg);
+          segmentCollection.size() + 1, oldestSeq, newestSeq, totalEntries, totalBytes, errorMsg);
     }
 
     try {
-      lifecycleManager.closeSegment(
-          currentStream, currentEntryCount, currentMinTimestamp, currentMaxTimestamp);
+      lifecycleManager.finalizeSegment(
+          currentStream,
+          new SegmentFinalizationData(currentEntryCount, currentMinTimestamp, currentMaxTimestamp));
 
       SegmentMetadata currentMetadata =
           new SegmentMetadata(
@@ -233,30 +376,31 @@ public class SegmentStoreManager implements SegmentStore {
               currentEntryCount,
               currentMinTimestamp,
               currentMaxTimestamp);
-      segments.add(currentMetadata);
+      segmentCollection.add(currentMetadata);
+
+      log.info(
+          "SegmentStoreManager closed: finalized segment {} with {} entries",
+          currentSequenceNumber,
+          currentEntryCount);
     } catch (IOException ex) {
       isOpen = false;
-      long oldestSeq = segments.isEmpty() ? 0 : segments.getFirst().sequenceNumber();
-      long newestSeq =
-          segments.isEmpty()
-              ? currentSequenceNumber
-              : segments.getLast().sequenceNumber();
+      long oldestSeq = segmentCollection.getOldestSequenceNumber();
+      long newestSeq = segmentCollection.getNewestSequenceNumber();
       String errorMsg = "Failed to finalize segment during close: " + ex.getMessage();
-      return CloseResult.closeFailed(segments.size() + 1, oldestSeq, newestSeq, errorMsg);
+      return CloseResult.closeFailed(segmentCollection.size() + 1, oldestSeq, newestSeq, errorMsg);
     } finally {
       isOpen = false;
     }
 
-    // Calculate totals from all finalized segments
     long totalEntries = 0;
     long totalBytes = 0;
-    for (SegmentMetadata seg : segments) {
+    for (SegmentMetadata seg : segmentCollection.getSegments()) {
       totalEntries += seg.entryCount();
       totalBytes += seg.fileSize();
     }
 
-    long oldestSeq = segments.getFirst().sequenceNumber();
-    long newestSeq = segments.getLast().sequenceNumber();
+    long oldestSeq = segmentCollection.getOldestSequenceNumber();
+    long newestSeq = segmentCollection.getNewestSequenceNumber();
 
     log.info(
         "SegmentStoreManager closed: finalized segment {} with {} entries",
@@ -264,13 +408,14 @@ public class SegmentStoreManager implements SegmentStore {
         currentEntryCount);
 
     return CloseResult.successfulClose(
-        segments.size(), oldestSeq, newestSeq, totalEntries, totalBytes);
+        segmentCollection.size(), oldestSeq, newestSeq, totalEntries, totalBytes);
   }
 
   private void rotateSegment() throws IOException {
     try {
       lifecycleManager.finalizeSegment(
-          currentStream, currentEntryCount, currentMinTimestamp, currentMaxTimestamp);
+          currentStream,
+          new SegmentFinalizationData(currentEntryCount, currentMinTimestamp, currentMaxTimestamp));
     } catch (IOException ex) {
       throw WalErrorClassifier.classifyIOException(ex, "finalize segment during rotation");
     }
@@ -285,13 +430,14 @@ public class SegmentStoreManager implements SegmentStore {
             currentMinTimestamp,
             currentMaxTimestamp);
 
-    segments.add(completedMetadata);
+    segmentCollection.add(completedMetadata);
     currentSequenceNumber = nextSegmentSequence++;
     try {
       this.currentStream = lifecycleManager.createNewSegment(currentSequenceNumber);
     } catch (IOException ex) {
       throw WalErrorClassifier.classifyIOException(ex, "create new segment during rotation");
     }
+    this.currentSegmentCreatedAt = System.currentTimeMillis();
     this.currentStreamSize = WalConstants.SEGMENT_HEADER_SIZE;
     this.currentEntryCount = 0;
     this.currentMinTimestamp = Long.MAX_VALUE;
@@ -301,7 +447,7 @@ public class SegmentStoreManager implements SegmentStore {
         FsyncExecutorFactory.create(config.fsyncStrategy(), fsyncRetryStrategy, currentStream);
 
     metrics.recordSegmentRotation();
-    metrics.setSegmentCount(segments.size());
+    metrics.setTotalSegmentCount(segmentCollection.size());
 
     log.info("Rotated segment: {} -> {}", currentSequenceNumber - 1, currentSequenceNumber);
   }
@@ -321,65 +467,12 @@ public class SegmentStoreManager implements SegmentStore {
     return entryRegion;
   }
 
-  public List<LogEntry> readAllAfterTimestamp(long timestamp) throws IOException {
-    List<LogEntry> allEntries = readAllSegments();
-    List<LogEntry> filtered = new ArrayList<>();
-
-    for (LogEntry entry : allEntries) {
-      if (entry.timestamp() > timestamp) {
-        filtered.add(entry);
-      }
-    }
-
-    return filtered;
-  }
-
-  public TruncateResult truncateBeforeTimestamp(long timestamp) throws IOException {
-    List<SegmentMetadata> toDelete = new ArrayList<>();
-
-    for (SegmentMetadata segmentMetadata : segments) {
-      if (segmentMetadata.maxTimestamp() <= timestamp) {
-        toDelete.add(segmentMetadata);
-      }
-    }
-
-    if (toDelete.size() == segments.size()) {
-      toDelete.removeLast();
-    }
-
-    if (toDelete.isEmpty()) {
-      long oldestRemaining = segments.isEmpty() ? 0 : segments.getFirst().sequenceNumber();
-      return TruncateResult.nothingToTruncate(oldestRemaining);
-    }
-
-    long segmentsRemoved = 0;
-    for (SegmentMetadata segmentMetadata : toDelete) {
-      File segmentFile = new File(config.logDir(), segmentMetadata.filename());
-      try {
-        FileUtils.deleteFile(segmentFile);
-        segments.remove(segmentMetadata);
-        segmentsRemoved++;
-        log.info("Truncated segment: {}", segmentMetadata.filename());
-      } catch (IOException ex) {
-        log.error("Failed to delete segment {}: {}", segmentMetadata.filename(), ex.getMessage());
-        String errorMsg =
-            "Failed to delete segment " + segmentMetadata.filename() + ": " + ex.getMessage();
-        long oldestRemaining = segments.isEmpty() ? 0 : segments.getFirst().sequenceNumber();
-        return TruncateResult.truncationFailed(oldestRemaining, errorMsg);
-      }
-    }
-
-    long oldestRemaining = segments.isEmpty() ? 0 : segments.getFirst().sequenceNumber();
-    return TruncateResult.successfulTruncate(segmentsRemoved, oldestRemaining);
-  }
-
-  @Override
-  public SimpleWalMetrics getMetrics() {
-    return metrics;
+  public WalMetricsQuery getMetrics() {
+    return (WalMetricsQuery) metrics;
   }
 
   public List<SegmentMetadata> getSegments() {
-    return new ArrayList<>(segments);
+    return segmentCollection.getSegments();
   }
 
   public long getCurrentSequenceNumber() {
@@ -394,7 +487,57 @@ public class SegmentStoreManager implements SegmentStore {
     return currentStreamSize;
   }
 
+  public long getCurrentMinTimestamp() {
+    return currentMinTimestamp;
+  }
+
+  public long getCurrentMaxTimestamp() {
+    return currentMaxTimestamp;
+  }
+
+  public long getCurrentSegmentCreatedAt() {
+    return currentSegmentCreatedAt;
+  }
+
+  public BatchState getBatchState() {
+    return batchBuffer.getBatchState();
+  }
+
   public boolean isOpen() {
     return isOpen;
+  }
+
+  @Override
+  public WalSnapshot getSnapshot() throws IOException {
+    return WalSnapshot.of(this);
+  }
+
+  @Override
+  public SegmentState getSegmentState(long sequenceNumber) throws IOException {
+    for (SegmentMetadata metadata : segmentCollection.getSegments()) {
+      if (metadata.sequenceNumber() == sequenceNumber) {
+        return new SegmentState(
+            metadata.sequenceNumber(),
+            metadata.entryCount(),
+            metadata.fileSize(),
+            metadata.minTimestamp(),
+            metadata.maxTimestamp(),
+            metadata.createdAt(),
+            true);
+      }
+    }
+
+    if (currentSequenceNumber == sequenceNumber) {
+      return new SegmentState(
+          currentSequenceNumber,
+          currentEntryCount,
+          currentStreamSize,
+          currentMinTimestamp,
+          currentMaxTimestamp,
+          currentSegmentCreatedAt,
+          false);
+    }
+
+    throw new IOException("Segment with sequence number " + sequenceNumber + " not found");
   }
 }
