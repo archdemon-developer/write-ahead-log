@@ -152,6 +152,10 @@ public class SegmentMetadataRecovery {
           "Footer CRC validation failed");
     }
 
+    if (footer.entryCount() == 0) {
+      throw WalErrorClassifier.classifyRecoveryError(
+          RecoveryType.INCOMPLETE_SEGMENT, "Segment has 0 entries: " + segmentFile.getName());
+    }
     return new SegmentMetadata(
         segmentFile.getName(),
         header.segmentSequence(),

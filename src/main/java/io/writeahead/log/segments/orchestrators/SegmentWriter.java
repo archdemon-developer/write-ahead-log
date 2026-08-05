@@ -84,44 +84,49 @@ public class SegmentWriter {
         FsyncExecutorFactory.create(config.fsyncStrategy(), fsyncRetryStrategy, currentStream);
   }
 
-  public AppendResult append(LogEntry entry) throws IOException {
-
-    batchBuffer.append(entry);
-
-    BatchState batchState = batchBuffer.getBatchState();
-
-    if (batchState.wouldExceedCapacity(entry.data().length, config.batchSize())) {
-      flushAndFsync();
-      return AppendResult.successfulAppendWithFlush(
-          currentSequenceNumber,
-          currentEntryCount,
-          currentStreamSize,
-          currentMinTimestamp,
-          currentMaxTimestamp);
-    }
-
-    return AppendResult.successfulAppendNoFlush(
-        (int) batchState.entriesPendingInBatch(),
-        currentSequenceNumber,
-        currentEntryCount,
-        currentStreamSize,
-        currentMinTimestamp,
-        currentMaxTimestamp);
+  public void appendDirectly(LogEntry entry) throws IOException {
+    writeEntryToStream(entry);
   }
 
   public AppendResult writeBatch() throws IOException {
-    if (batchBuffer.isEmpty()) {
-      log.debug("writeBatch called but batch is empty, nothing to flush");
-      return AppendResult.successfulAppendNoFlush(
-          0,
-          currentSequenceNumber,
-          currentEntryCount,
-          currentStreamSize,
-          currentMinTimestamp,
-          currentMaxTimestamp);
+    if (!batchBuffer.isEmpty()) {
+      BatchFlushResult flushResult = batchBuffer.writeBatch();
+      List<LogEntry> entriesToWrite = flushResult.entries();
+
+      for (LogEntry entry : entriesToWrite) {
+        writeEntryToStream(entry);
+
+        try {
+          fsyncExecutor.onEntryWritten();
+        } catch (IOException ex) {
+          throw WalErrorClassifier.classifyIOException(ex, "fsync after entry write");
+        }
+      }
     }
 
-    flushAndFsync();
+    try {
+      fsyncExecutor.onBatchComplete();
+    } catch (IOException ex) {
+      throw WalErrorClassifier.classifyIOException(ex, "fsync after batch complete");
+    }
+
+    SegmentState currentSegState =
+        new SegmentState(
+            currentSequenceNumber,
+            currentEntryCount,
+            currentStreamSize,
+            currentMinTimestamp,
+            currentMaxTimestamp,
+            currentSegmentCreatedAt,
+            false);
+
+    RotationDecision rotationDecision =
+        segmentCollection.shouldRotate(rotationPolicy, currentSegState, config.maxSegmentSize());
+
+    if (rotationDecision.needsRotation()) {
+      rotateSegment();
+    }
+
     return AppendResult.successfulAppendWithFlush(
         currentSequenceNumber,
         currentEntryCount,
@@ -260,6 +265,19 @@ public class SegmentWriter {
       writeBatch();
     }
 
+    if (currentEntryCount == 0) {
+      log.warn("Segment {} has 0 entries, skipping finalization", currentSequenceNumber);
+      try {
+        if (currentStream != null) {
+          currentStream.dataOutputStream().close();
+          currentStream.fileOutputStream().close();
+        }
+      } catch (IOException ex) {
+        log.error("Failed to close empty segment stream", ex);
+      }
+      return;
+    }
+
     lifecycleManager.finalizeSegment(
         currentStream,
         new SegmentFinalizationData(currentEntryCount, currentMinTimestamp, currentMaxTimestamp));
@@ -275,5 +293,27 @@ public class SegmentWriter {
             currentMaxTimestamp);
 
     segmentCollection.add(currentMetadata);
+  }
+
+  private void writeEntryToStream(LogEntry entry) throws IOException {
+
+    long crc = Crc32Utils.computeEntryCrc(entry.timestamp(), entry.data().length, entry.data());
+
+    byte[] entryBytes =
+        EntrySerdes.serializeEntryWithCrc(
+            entry.timestamp(), entry.data().length, entry.data(), crc);
+
+    try {
+      FileUtils.writeToStream(currentStream, entryBytes);
+    } catch (IOException ex) {
+      throw WalErrorClassifier.classifyIOException(ex, "write entry to segment");
+    }
+
+    currentStreamSize += entryBytes.length;
+    currentEntryCount++;
+    currentMinTimestamp = Math.min(currentMinTimestamp, entry.timestamp());
+    currentMaxTimestamp = Math.max(currentMaxTimestamp, entry.timestamp());
+
+    metrics.recordEntryAppended(entry.data().length);
   }
 }

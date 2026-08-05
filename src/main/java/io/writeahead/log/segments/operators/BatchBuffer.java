@@ -13,6 +13,8 @@ public class BatchBuffer {
   private long oldestTimestamp;
   private long newestTimestamp;
 
+  private static final long MAX_BUFFER_BYTES = 100 * 1024 * 1024;
+
   public BatchBuffer() {
     entries = new ArrayList<>();
     totalBytesInBatch = 0;
@@ -60,5 +62,9 @@ public class BatchBuffer {
     }
     return BatchState.withPendingEntries(
         size(), totalBytesInBatch, oldestTimestamp, newestTimestamp);
+  }
+
+  public boolean canAccept(LogEntry entry) {
+    return totalBytesInBatch + entry.size() <= MAX_BUFFER_BYTES;
   }
 }

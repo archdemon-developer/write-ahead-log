@@ -5,7 +5,7 @@ import io.writeahead.log.models.results.AppendResult;
 import java.io.IOException;
 
 public interface WriteStore {
-  AppendResult append(LogEntry entry) throws IOException;
+  void appendDirectly(LogEntry entry) throws IOException;
 
   AppendResult writeBatch() throws IOException;
 }

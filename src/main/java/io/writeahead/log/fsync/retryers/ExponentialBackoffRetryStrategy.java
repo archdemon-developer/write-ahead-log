@@ -7,6 +7,7 @@ import io.writeahead.log.logging.LoggerFactory;
 import io.writeahead.log.metrics.WalMetricsRecorder;
 import io.writeahead.log.utils.WalErrorClassifier;
 import java.io.IOException;
+import java.util.concurrent.ThreadLocalRandom;
 
 public class ExponentialBackoffRetryStrategy implements FsyncRetryStrategy {
 
@@ -67,18 +68,21 @@ public class ExponentialBackoffRetryStrategy implements FsyncRetryStrategy {
       }
     }
 
-    log.error(
-        "Fsync failed after {} attempts: {}",
-        lastException,
-        (maxRetries + 1),
-        lastException == null ? null : lastException.getMessage());
+    if (lastException == null) {
+      throw new IOException("Fsync failed but no exception was recorded");
+    }
+
+    log.error("Fsync failed after {} attempts: {}", (maxRetries + 1), lastException.getMessage());
 
     throw lastException;
   }
 
-  private void sleep(long waitMs) throws IOException {
+  private void sleep(long baseWaitMs) throws IOException {
+    long jitterMs = ThreadLocalRandom.current().nextLong(0, baseWaitMs / 4);
+    long finalWaitMs = baseWaitMs + jitterMs;
+
     try {
-      Thread.sleep(waitMs);
+      Thread.sleep(finalWaitMs);
     } catch (InterruptedException ex) {
       Thread.currentThread().interrupt();
       throw new IOException("Interrupted during fsync retry", ex);

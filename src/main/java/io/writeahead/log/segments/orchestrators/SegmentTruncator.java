@@ -36,11 +36,12 @@ public class SegmentTruncator {
       File segmentFile = new File(config.logDir(), metadata.filename());
       try {
         FileUtils.deleteFile(segmentFile);
-        log.info("Truncated segment: {}", metadata.filename());
+        log.info("Deleted segment file: {}", metadata.filename());
       } catch (IOException ex) {
-        String errorMsg =
-            "Failed to delete segment " + metadata.filename() + ": " + ex.getMessage();
-        return TruncateResult.truncationFailed(segmentResult.oldestRemainingSequence(), errorMsg);
+        log.warn(
+            "Failed to delete segment file {}, will be cleaned up on next recovery: {}",
+            metadata.filename(),
+            ex.getMessage());
       }
     }
 

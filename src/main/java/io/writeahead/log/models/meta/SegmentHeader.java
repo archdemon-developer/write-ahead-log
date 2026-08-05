@@ -41,6 +41,18 @@ public record SegmentHeader(
       throw new IOException("Header data too short: " + data.length + " < " + HEADER_SIZE);
     }
 
+    byte version = data[1];
+
+    return switch (version) {
+      case 0x01 -> parseV1(data);
+      case 0x02 -> throw new IOException("Version 0x02 not yet implemented");
+      default ->
+          throw new IOException(
+              "Unknown segment version: 0x" + Integer.toHexString(version & 0xFF));
+    };
+  }
+
+  private static SegmentHeader parseV1(byte[] data) throws IOException {
     try (ByteArrayInputStream byteArrayInputStream = new ByteArrayInputStream(data);
         DataInputStream dataInputStream = new DataInputStream(byteArrayInputStream)) {
       byte magic = dataInputStream.readByte();

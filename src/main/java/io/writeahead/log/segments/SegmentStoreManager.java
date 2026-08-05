@@ -88,14 +88,13 @@ public class SegmentStoreManager implements SegmentStore {
         walMetadata.nextSequence());
   }
 
-  @Override
-  public AppendResult append(LogEntry logEntry) throws IOException {
+  public void appendDirectly(LogEntry entry) throws IOException {
     if (!isOpen) {
       throw WalErrorClassifier.classifyIOException(
-          new IOException("SegmentStoreManager is closed"), "append to closed WAL");
+          new IOException("SegmentStoreManager is closed"), "appendDirectly on closed WAL");
     }
 
-    return writer.append(logEntry);
+    writer.appendDirectly(entry);
   }
 
   @Override
