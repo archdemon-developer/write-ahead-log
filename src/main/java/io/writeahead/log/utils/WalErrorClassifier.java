@@ -1,9 +1,9 @@
 package io.writeahead.log.utils;
 
-import io.writeahead.log.enums.ConcurrencyErrorType;
-import io.writeahead.log.enums.CorruptionType;
-import io.writeahead.log.enums.ErrorContext;
-import io.writeahead.log.enums.RecoveryType;
+import io.writeahead.log.enums.exceptions.ConcurrencyErrorType;
+import io.writeahead.log.enums.exceptions.CorruptionType;
+import io.writeahead.log.enums.exceptions.ErrorContext;
+import io.writeahead.log.enums.strategies.RecoveryType;
 import io.writeahead.log.exceptions.*;
 import java.io.FileNotFoundException;
 import java.io.IOException;

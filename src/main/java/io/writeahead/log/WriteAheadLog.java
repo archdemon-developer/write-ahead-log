@@ -6,9 +6,9 @@
 // import io.writeahead.log.metrics.WalMetrics;
 // import io.writeahead.log.metrics.WalPerformanceMetrics;
 // import io.writeahead.log.models.LogEntry;
-// import io.writeahead.log.models.WalConfiguration;
+// import io.writeahead.log.config.WalConfiguration;
 // import io.writeahead.log.segments.SegmentStoreManager;
-// import io.writeahead.log.segments.SegmentStore;
+// import io.writeahead.log.segments.stores.SegmentStore;
 //
 // import java.io.IOException;
 // import java.util.ArrayList;

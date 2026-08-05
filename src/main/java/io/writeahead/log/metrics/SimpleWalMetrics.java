@@ -1,7 +1,7 @@
 package io.writeahead.log.metrics;
 
-import io.writeahead.log.enums.CorruptionType;
-import io.writeahead.log.enums.ErrorContext;
+import io.writeahead.log.enums.exceptions.CorruptionType;
+import io.writeahead.log.enums.exceptions.ErrorContext;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;

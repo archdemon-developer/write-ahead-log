@@ -2,9 +2,9 @@ package io.writeahead.log.fsync.executor;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-import io.writeahead.log.fsync.EveryBatchFsyncExecutor;
 import io.writeahead.log.fsync.FsyncOperation;
-import io.writeahead.log.fsync.FsyncRetryStrategy;
+import io.writeahead.log.fsync.executors.EveryBatchFsyncExecutor;
+import io.writeahead.log.fsync.retryers.FsyncRetryStrategy;
 import io.writeahead.log.models.FileStream;
 import java.io.IOException;
 import java.nio.file.Files;

@@ -2,9 +2,10 @@ package io.writeahead.log.segments;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import io.writeahead.log.config.WalConfiguration;
 import io.writeahead.log.models.LogEntry;
-import io.writeahead.log.models.SegmentMetadata;
-import io.writeahead.log.models.WalConfiguration;
+import io.writeahead.log.models.meta.SegmentMetadata;
+import io.writeahead.log.segments.management.SegmentLifecycleManager;
 import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;

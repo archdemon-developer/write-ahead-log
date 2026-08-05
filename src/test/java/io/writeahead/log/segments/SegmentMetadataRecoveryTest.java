@@ -3,7 +3,9 @@ package io.writeahead.log.segments;
 import static org.junit.jupiter.api.Assertions.*;
 
 import io.writeahead.log.metrics.SimpleWalMetrics;
-import io.writeahead.log.models.WalMetadata;
+import io.writeahead.log.models.meta.WalMetadata;
+import io.writeahead.log.segments.management.SegmentLifecycleManager;
+import io.writeahead.log.segments.management.SegmentMetadataRecovery;
 import io.writeahead.log.utils.FileUtils;
 import java.io.File;
 import java.io.IOException;

@@ -2,11 +2,11 @@ package io.writeahead.log.fsync.factory;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-import io.writeahead.log.fsync.ExponentialBackoffRetryStrategy;
-import io.writeahead.log.fsync.FsyncRetryStrategy;
-import io.writeahead.log.fsync.FsyncRetryStrategyFactory;
+import io.writeahead.log.config.WalConfiguration;
+import io.writeahead.log.fsync.retryers.ExponentialBackoffRetryStrategy;
+import io.writeahead.log.fsync.retryers.FsyncRetryStrategy;
+import io.writeahead.log.fsync.retryers.FsyncRetryStrategyFactory;
 import io.writeahead.log.metrics.SimpleWalMetrics;
-import io.writeahead.log.models.WalConfiguration;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import org.junit.jupiter.api.AfterEach;

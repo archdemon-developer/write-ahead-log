@@ -2,6 +2,7 @@ package io.writeahead.log.models;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import io.writeahead.log.models.results.TruncateResult;
 import org.junit.jupiter.api.Test;
 
 class TruncateResultTest {

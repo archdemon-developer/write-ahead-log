@@ -2,7 +2,7 @@ package io.writeahead.log.utils;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-import io.writeahead.log.enums.ErrorContext;
+import io.writeahead.log.enums.exceptions.ErrorContext;
 import io.writeahead.log.exceptions.PermanentIOException;
 import io.writeahead.log.exceptions.TransientIOException;
 import io.writeahead.log.exceptions.WalException;

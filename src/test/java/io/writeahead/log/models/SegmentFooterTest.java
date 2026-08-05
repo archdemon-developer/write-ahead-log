@@ -2,6 +2,7 @@ package io.writeahead.log.models;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import io.writeahead.log.models.meta.SegmentFooter;
 import java.io.IOException;
 import org.junit.jupiter.api.Test;
 

@@ -3,6 +3,7 @@ package io.writeahead.log.segments;
 import static org.junit.jupiter.api.Assertions.*;
 
 import io.writeahead.log.models.FileStream;
+import io.writeahead.log.segments.management.SegmentLifecycleManager;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;

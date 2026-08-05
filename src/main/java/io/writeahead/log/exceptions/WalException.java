@@ -1,7 +1,7 @@
 package io.writeahead.log.exceptions;
 
-import io.writeahead.log.enums.ErrorContext;
-import io.writeahead.log.enums.ErrorRecoveryAction;
+import io.writeahead.log.enums.exceptions.ErrorContext;
+import io.writeahead.log.enums.exceptions.ErrorRecoveryAction;
 import java.io.IOException;
 
 public abstract class WalException extends IOException {

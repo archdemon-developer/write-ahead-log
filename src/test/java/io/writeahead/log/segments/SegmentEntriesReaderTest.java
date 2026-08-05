@@ -2,10 +2,11 @@ package io.writeahead.log.segments;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-import io.writeahead.log.enums.CorruptionType;
+import io.writeahead.log.enums.exceptions.CorruptionType;
 import io.writeahead.log.exceptions.CorruptionException;
 import io.writeahead.log.metrics.SimpleWalMetrics;
 import io.writeahead.log.models.LogEntry;
+import io.writeahead.log.segments.operators.SegmentEntriesReader;
 import io.writeahead.log.serdes.EntrySerdes;
 import io.writeahead.log.utils.Crc32Utils;
 import java.io.ByteArrayOutputStream;

@@ -2,7 +2,9 @@ package io.writeahead.log.models;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-import io.writeahead.log.segments.BatchBuffer;
+import io.writeahead.log.models.results.BatchFlushResult;
+import io.writeahead.log.models.states.BatchState;
+import io.writeahead.log.segments.operators.BatchBuffer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 

@@ -1,6 +1,6 @@
 package io.writeahead.log.logging;
 
-import io.writeahead.log.enums.LogLevel;
+import io.writeahead.log.enums.levels.LogLevel;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 

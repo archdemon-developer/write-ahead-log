@@ -2,9 +2,9 @@ package io.writeahead.log.utils;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-import io.writeahead.log.enums.ConcurrencyErrorType;
-import io.writeahead.log.enums.CorruptionType;
-import io.writeahead.log.enums.RecoveryType;
+import io.writeahead.log.enums.exceptions.ConcurrencyErrorType;
+import io.writeahead.log.enums.exceptions.CorruptionType;
+import io.writeahead.log.enums.strategies.RecoveryType;
 import io.writeahead.log.exceptions.*;
 import org.junit.jupiter.api.Test;
 

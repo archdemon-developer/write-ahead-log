@@ -2,9 +2,13 @@ package io.writeahead.log.fsync.factory;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-import io.writeahead.log.enums.FsyncStrategy;
-import io.writeahead.log.fsync.*;
-import io.writeahead.log.fsync.ExponentialBackoffRetryStrategy;
+import io.writeahead.log.enums.strategies.FsyncStrategy;
+import io.writeahead.log.fsync.executors.EveryBatchFsyncExecutor;
+import io.writeahead.log.fsync.executors.EveryEntryFsyncExecutor;
+import io.writeahead.log.fsync.executors.FsyncExecutor;
+import io.writeahead.log.fsync.executors.FsyncExecutorFactory;
+import io.writeahead.log.fsync.retryers.ExponentialBackoffRetryStrategy;
+import io.writeahead.log.fsync.retryers.FsyncRetryStrategy;
 import io.writeahead.log.metrics.SimpleWalMetrics;
 import io.writeahead.log.models.FileStream;
 import java.io.DataOutputStream;

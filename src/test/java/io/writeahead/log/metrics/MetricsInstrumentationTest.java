@@ -2,8 +2,8 @@ package io.writeahead.log.metrics;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import io.writeahead.log.config.WalConfiguration;
 import io.writeahead.log.models.LogEntry;
-import io.writeahead.log.models.WalConfiguration;
 import io.writeahead.log.segments.SegmentStoreManager;
 import java.nio.file.Files;
 import java.nio.file.Path;

@@ -1,7 +1,7 @@
 package io.writeahead.log.metrics;
 
-import io.writeahead.log.enums.CorruptionType;
-import io.writeahead.log.enums.ErrorContext;
+import io.writeahead.log.enums.exceptions.CorruptionType;
+import io.writeahead.log.enums.exceptions.ErrorContext;
 
 public interface WalMetricsRecorder {
 
