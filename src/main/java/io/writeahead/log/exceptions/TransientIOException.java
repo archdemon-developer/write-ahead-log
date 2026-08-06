@@ -3,7 +3,7 @@ package io.writeahead.log.exceptions;
 import io.writeahead.log.enums.exceptions.ErrorContext;
 import io.writeahead.log.enums.exceptions.ErrorRecoveryAction;
 
-public class TransientIOException extends WalException {
+public final class TransientIOException extends WalException {
 
   public TransientIOException(String message, ErrorContext context, String operationDesc) {
     super(message, context, ErrorRecoveryAction.RETRY_WITH_BACKOFF, operationDesc);

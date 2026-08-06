@@ -2,7 +2,7 @@ package io.writeahead.log.segments.filter.truncate;
 
 import io.writeahead.log.models.meta.SegmentMetadata;
 
-public class BeforeTimestampTruncateFilter implements TruncateFilter {
+public final class BeforeTimestampTruncateFilter implements TruncateFilter {
   private final long threshold;
 
   public BeforeTimestampTruncateFilter(long threshold) {

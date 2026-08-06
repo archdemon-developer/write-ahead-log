@@ -4,7 +4,7 @@ import io.writeahead.log.enums.exceptions.ConcurrencyErrorType;
 import io.writeahead.log.enums.exceptions.ErrorContext;
 import io.writeahead.log.enums.exceptions.ErrorRecoveryAction;
 
-public class ConcurrencyException extends WalException {
+public final class ConcurrencyException extends WalException {
 
   private final ConcurrencyErrorType concurrencyErrorType;
 

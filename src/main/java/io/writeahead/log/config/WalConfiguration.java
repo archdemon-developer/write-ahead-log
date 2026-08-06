@@ -14,6 +14,45 @@ public record WalConfiguration(
     double retryBackoffMultiplier,
     RotationPolicyType rotationPolicyType) {
 
+  public WalConfiguration {
+    if (batchSize <= 0) {
+      throw new IllegalArgumentException("batchSize must be > 0, got: " + batchSize);
+    }
+
+    if (maxSegmentSize <= 0) {
+      throw new IllegalArgumentException("maxSegmentSize must be > 0, got: " + maxSegmentSize);
+    }
+
+    if (logDir == null || logDir.isBlank()) {
+      throw new IllegalArgumentException("logDir cannot be null or blank");
+    }
+
+    if (fsyncStrategy == null) {
+      throw new IllegalArgumentException("fsyncStrategy cannot be null");
+    }
+
+    if (timestampFormat == null || timestampFormat.isBlank()) {
+      throw new IllegalArgumentException("timestampFormat cannot be null or blank");
+    }
+
+    if (maxRetries < 0) {
+      throw new IllegalArgumentException("maxRetries must be >= 0, got: " + maxRetries);
+    }
+
+    if (retryBackoffMs <= 0) {
+      throw new IllegalArgumentException("retryBackoffMs must be > 0, got: " + retryBackoffMs);
+    }
+
+    if (retryBackoffMultiplier <= 0) {
+      throw new IllegalArgumentException(
+          "retryBackoffMultiplier must be > 0, got: " + retryBackoffMultiplier);
+    }
+
+    if (rotationPolicyType == null) {
+      throw new IllegalArgumentException("rotationPolicyType cannot be null");
+    }
+  }
+
   public static class Builder {
     private int batchSize = 10;
     private long maxSegmentSize = 10 * 1024 * 1024;
@@ -71,27 +110,6 @@ public record WalConfiguration(
     }
 
     public WalConfiguration build() {
-      if (logDir == null) {
-        throw new IllegalArgumentException("logDir is required");
-      }
-
-      if (batchSize <= 0) {
-        throw new IllegalArgumentException("batchSize must be > 0, got: " + batchSize);
-      }
-      if (maxSegmentSize <= 0) {
-        throw new IllegalArgumentException("maxSegmentSize must be > 0, got: " + maxSegmentSize);
-      }
-      if (maxRetries < 0) {
-        throw new IllegalArgumentException("maxRetries must be >= 0, got: " + maxRetries);
-      }
-      if (retryBackoffMs <= 0) {
-        throw new IllegalArgumentException("retryBackoffMs must be > 0, got: " + retryBackoffMs);
-      }
-      if (retryBackoffMultiplier <= 0) {
-        throw new IllegalArgumentException(
-            "retryBackoffMultiplier must be > 0, got: " + retryBackoffMultiplier);
-      }
-
       return new WalConfiguration(
           batchSize,
           maxSegmentSize,

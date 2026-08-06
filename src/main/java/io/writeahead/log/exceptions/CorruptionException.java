@@ -4,7 +4,7 @@ import io.writeahead.log.enums.exceptions.CorruptionType;
 import io.writeahead.log.enums.exceptions.ErrorContext;
 import io.writeahead.log.enums.exceptions.ErrorRecoveryAction;
 
-public class CorruptionException extends WalException {
+public final class CorruptionException extends WalException {
 
   private final String segmentName;
   private final long byteOffset;

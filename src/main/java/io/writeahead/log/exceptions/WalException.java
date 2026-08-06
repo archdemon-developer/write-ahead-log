@@ -4,7 +4,12 @@ import io.writeahead.log.enums.exceptions.ErrorContext;
 import io.writeahead.log.enums.exceptions.ErrorRecoveryAction;
 import java.io.IOException;
 
-public abstract class WalException extends IOException {
+public abstract sealed class WalException extends IOException
+    permits TransientIOException,
+        PermanentIOException,
+        CorruptionException,
+        RecoveryException,
+        ConcurrencyException {
 
   private final ErrorContext errorContext;
   private final ErrorRecoveryAction suggestedAction;

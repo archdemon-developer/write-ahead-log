@@ -12,6 +12,33 @@ public record SegmentHeader(
     byte[] reserved,
     long checksum) {
 
+  public SegmentHeader {
+    if (magic != (byte) 0xAA) {
+      throw new IllegalArgumentException(
+          "magic must be 0xAA, got: 0x" + String.format("%02X", magic));
+    }
+
+    if (version != 0x01) {
+      throw new IllegalArgumentException(
+          "version must be 0x01, got: 0x" + String.format("%02X", version));
+    }
+
+    if (createdAt < 0) {
+      throw new IllegalArgumentException("createdAt cannot be negative, got: " + createdAt);
+    }
+
+    if (segmentSequence < 0) {
+      throw new IllegalArgumentException(
+          "segmentSequence cannot be negative, got: " + segmentSequence);
+    }
+
+    if (reserved == null || reserved.length != 22) {
+      throw new IllegalArgumentException(
+          "reserved must be exactly 22 bytes, got: "
+              + (reserved == null ? "null" : reserved.length));
+    }
+  }
+
   private static final byte MAGIC_BYTE = (byte) 0xAA;
   private static final byte VERSION = 0x01;
   private static final int HEADER_SIZE = WalConstants.SEGMENT_HEADER_SIZE;

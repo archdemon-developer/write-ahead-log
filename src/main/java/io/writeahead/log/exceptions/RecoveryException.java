@@ -4,7 +4,7 @@ import io.writeahead.log.enums.exceptions.ErrorContext;
 import io.writeahead.log.enums.exceptions.ErrorRecoveryAction;
 import io.writeahead.log.enums.strategies.RecoveryType;
 
-public class RecoveryException extends WalException {
+public final class RecoveryException extends WalException {
 
   private final RecoveryType recoveryType;
 

@@ -10,6 +10,18 @@ public record SegmentFooter(
   private static final int FOOTER_SIZE = WalConstants.SEGMENT_FOOTER_SIZE;
   private static final long COMPLETE_MARKER = 0xDEADBEEFL;
 
+  public SegmentFooter {
+    if (entryCount <= 0) {
+      throw new IllegalArgumentException(
+          "entryCount must be > 0 (only finalized segments have footers), got: " + entryCount);
+    }
+
+    if (minTimestamp > maxTimestamp) {
+      throw new IllegalArgumentException(
+          "minTimestamp (%d) cannot be > maxTimestamp (%d)".formatted(minTimestamp, maxTimestamp));
+    }
+  }
+
   public static SegmentFooter create(int entryCount, long minTimestamp, long maxTimestamp)
       throws IOException {
     long checksum = calculateChecksum(entryCount, minTimestamp, maxTimestamp, COMPLETE_MARKER);

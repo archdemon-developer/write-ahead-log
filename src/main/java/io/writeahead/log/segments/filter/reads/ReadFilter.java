@@ -5,7 +5,7 @@ import io.writeahead.log.models.LogEntry;
 import io.writeahead.log.models.meta.SegmentMetadata;
 import io.writeahead.log.models.results.FilterResult;
 
-public interface ReadFilter {
+public sealed interface ReadFilter permits AfterTimestampFilter {
   FilterResult matches(LogEntry entry);
 
   ReadFilterType name();

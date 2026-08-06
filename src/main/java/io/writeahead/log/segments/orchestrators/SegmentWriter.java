@@ -269,8 +269,7 @@ public class SegmentWriter {
       log.warn("Segment {} has 0 entries, skipping finalization", currentSequenceNumber);
       try {
         if (currentStream != null) {
-          currentStream.dataOutputStream().close();
-          currentStream.fileOutputStream().close();
+          currentStream.closeAll();
         }
       } catch (IOException ex) {
         log.error("Failed to close empty segment stream", ex);

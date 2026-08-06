@@ -31,8 +31,7 @@ public class FileUtils {
   }
 
   public static void closeStream(FileStream fileStream) throws IOException {
-    DataOutputStream dataOutputStream = fileStream.dataOutputStream();
-    dataOutputStream.close();
+    fileStream.closeAll();
   }
 
   public static byte[] readAllBytes(File file) throws IOException {
