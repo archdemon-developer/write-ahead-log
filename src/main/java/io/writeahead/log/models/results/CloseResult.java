@@ -33,7 +33,6 @@ public record CloseResult(
           "totalBytesPersisted cannot be negative, got " + totalBytesPersisted);
     }
 
-    // If no segments, sequence numbers must be 0
     if (totalSegmentsAtClose == 0) {
       if (oldestSegmentSequence != 0) {
         throw new IllegalArgumentException(
@@ -47,7 +46,6 @@ public record CloseResult(
       }
     }
 
-    // If segments exist, oldest must be <= newest
     if (totalSegmentsAtClose > 0) {
       if (oldestSegmentSequence > newestSegmentSequence) {
         throw new IllegalArgumentException(

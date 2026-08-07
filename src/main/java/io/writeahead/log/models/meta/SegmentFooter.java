@@ -20,6 +20,11 @@ public record SegmentFooter(
       throw new IllegalArgumentException(
           "minTimestamp (%d) cannot be > maxTimestamp (%d)".formatted(minTimestamp, maxTimestamp));
     }
+
+    if (completeMarker != COMPLETE_MARKER) {
+      throw new IllegalArgumentException(
+          "Complete marker must be: 0xDEADBEEFL, got: " + completeMarker);
+    }
   }
 
   public static SegmentFooter create(int entryCount, long minTimestamp, long maxTimestamp)

@@ -160,11 +160,9 @@ public class WriteAheadLog {
         batch.clear();
 
         try {
-          // Wait for first entry (timeout allows periodic flush)
           WriteTask first = writeQueue.poll(100, TimeUnit.MILLISECONDS);
 
           if (first == null) {
-            // Timeout: flush pending entries if any
             int pending = segmentStore.getCurrentEntryCount();
             if (pending > 0) {
               flushBatch(batch);

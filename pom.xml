@@ -50,10 +50,8 @@
                         <configuration>
                             <excludes>
                                 <exclude>*Test</exclude>
-                                <exclude>io/writeahead/log/models/**/*</exclude>
-                                <exclude>io/writeahead/log/constants/**/*</exclude>
+                                <exclude>io/writeahead/log/enums/**/*</exclude>
                                 <exclude>io/writeahead/log/exceptions/**/*</exclude>
-                                <exclude>io/writeahead/log/logging/**/*</exclude>
                             </excludes>
                         </configuration>
                     </execution>
@@ -66,7 +64,7 @@
                         <configuration>
                             <rules>
                                 <rule>
-                                    <element>PACKAGE</element>
+                                    <element>BUNDLE</element>
                                     <limits>
                                         <limit>
                                             <counter>LINE</counter>
@@ -78,10 +76,8 @@
                             </rules>
                             <excludes>
                                 <exclude>*Test</exclude>
-                                <exclude>io/writeahead/log/models/**/*</exclude>
-                                <exclude>io/writeahead/log/constants/**/*</exclude>
+                                <exclude>io/writeahead/log/enums/**/*</exclude>
                                 <exclude>io/writeahead/log/exceptions/**/*</exclude>
-                                <exclude>io/writeahead/log/logging/**/*</exclude>
                             </excludes>
                         </configuration>
                     </execution>

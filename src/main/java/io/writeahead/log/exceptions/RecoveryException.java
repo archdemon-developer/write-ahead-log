@@ -21,7 +21,7 @@ public final class RecoveryException extends WalException {
 
   @Override
   public boolean indicatesDataLoss() {
-    return true; // Skipping entries = data loss
+    return true;
   }
 
   @Override

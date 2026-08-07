@@ -19,7 +19,7 @@ public final class ConcurrencyException extends WalException {
 
   @Override
   public boolean isTransient() {
-    return true; // Transient: retry the operation
+    return true;
   }
 
   @Override

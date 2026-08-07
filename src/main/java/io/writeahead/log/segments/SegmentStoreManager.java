@@ -204,7 +204,17 @@ public class SegmentStoreManager implements SegmentStore {
 
   @Override
   public WalSnapshot getSnapshot() throws IOException {
-    return WalSnapshot.of(this);
+    return WalSnapshot.of(
+        getSegments(),
+        getCurrentSequenceNumber(),
+        getCurrentStreamSize(),
+        getCurrentEntryCount(),
+        getCurrentMinTimestamp(),
+        getCurrentMaxTimestamp(),
+        getCurrentSegmentCreatedAt(),
+        getBatchState(),
+        getMetrics(),
+        isOpen());
   }
 
   @Override

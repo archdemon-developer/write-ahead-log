@@ -31,9 +31,6 @@ public record SegmentFinalizationData(int entryCount, long minTimestamp, long ma
   }
 
   public long getAverageTimestampPerEntry() {
-    if (entryCount == 0) {
-      return 0;
-    }
     return getTimestampRange() / entryCount;
   }
 

@@ -10,10 +10,16 @@ public class LoggerFactory {
   }
 
   public static Logger getLogger(String name) {
+    if (name == null) {
+      throw new IllegalArgumentException("name should not be null");
+    }
     return new SimpleLogger(name, globalMinLevel);
   }
 
   public static void setLogLevel(LogLevel level) {
+    if (level == null) {
+      throw new IllegalArgumentException("Log level cannot be null");
+    }
     globalMinLevel = level;
   }
 

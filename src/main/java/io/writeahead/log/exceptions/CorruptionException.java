@@ -9,8 +9,8 @@ public final class CorruptionException extends WalException {
   private final String segmentName;
   private final long byteOffset;
   private final CorruptionType corruptionType;
-  private final long computedValue; // Computed CRC or magic byte
-  private final long expectedValue; // Expected CRC or magic byte
+  private final long computedValue;
+  private final long expectedValue;
 
   public CorruptionException(
       String message,
@@ -47,7 +47,6 @@ public final class CorruptionException extends WalException {
     return "CORRUPTION_" + corruptionType.name();
   }
 
-  // Getters for corruption details
   public String segmentName() {
     return segmentName;
   }

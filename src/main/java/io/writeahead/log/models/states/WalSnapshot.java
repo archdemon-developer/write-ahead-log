@@ -2,8 +2,6 @@ package io.writeahead.log.models.states;
 
 import io.writeahead.log.metrics.WalMetricsQuery;
 import io.writeahead.log.models.meta.SegmentMetadata;
-import io.writeahead.log.segments.SegmentStoreManager;
-import java.io.IOException;
 import java.util.List;
 
 public record WalSnapshot(
@@ -18,23 +16,37 @@ public record WalSnapshot(
     if (closedSegments == null) {
       throw new IllegalArgumentException("closedSegments cannot be null");
     }
+
     if (currentSegment == null) {
       throw new IllegalArgumentException("currentSegment cannot be null");
     }
+
     if (batchState == null) {
       throw new IllegalArgumentException("batchState cannot be null");
     }
+
     if (metrics == null) {
       throw new IllegalArgumentException("metrics cannot be null");
     }
+
     if (snapshotTimeMs < 0) {
       throw new IllegalArgumentException(
           "snapshotTimeMs cannot be negative, got " + snapshotTimeMs);
     }
   }
 
-  public static WalSnapshot of(SegmentStoreManager manager) throws IOException {
-    List<SegmentMetadata> closedSegmentMetadata = manager.getSegments();
+  public static WalSnapshot of(
+      List<SegmentMetadata> closedSegmentMetadata,
+      long currentSequenceNumber,
+      long currentEntryCount,
+      int currentStreamSize,
+      long currentMinTimestamp,
+      long currentMaxTimestamp,
+      long currentSegmentCreatedAt,
+      BatchState batchState,
+      WalMetricsQuery metrics,
+      boolean isOpen)
+      throws java.io.IOException {
 
     List<SegmentState> closedSegments =
         closedSegmentMetadata.stream()
@@ -52,43 +64,34 @@ public record WalSnapshot(
 
     SegmentState currentSegment =
         new SegmentState(
-            manager.getCurrentSequenceNumber(),
-            manager.getCurrentEntryCount(),
-            manager.getCurrentStreamSize(),
-            manager.getCurrentMinTimestamp(),
-            manager.getCurrentMaxTimestamp(),
-            manager.getCurrentSegmentCreatedAt(),
+            currentSequenceNumber,
+            currentEntryCount,
+            currentStreamSize,
+            currentMinTimestamp,
+            currentMaxTimestamp,
+            currentSegmentCreatedAt,
             false);
 
     long snapshotTimeMs = System.currentTimeMillis();
 
     return new WalSnapshot(
-        closedSegments,
-        currentSegment,
-        manager.getBatchState(),
-        manager.getMetrics(),
-        manager.isOpen(),
-        snapshotTimeMs);
+        closedSegments, currentSegment, batchState, metrics, isOpen, snapshotTimeMs);
   }
 
+  /** Helper: Total entry count across all segments (closed + current). */
   public long getTotalEntries() {
-    long total = currentSegment.entryCount();
-    for (SegmentState segment : closedSegments) {
-      total += segment.entryCount();
-    }
-    return total;
+    long totalFromClosed = closedSegments.stream().mapToLong(SegmentState::entryCount).sum();
+    return totalFromClosed + currentSegment.entryCount();
   }
 
+  /** Helper: Total byte count across all segments (closed + current). */
   public long getTotalBytes() {
-    long total = currentSegment.totalByteCount();
-    for (SegmentState segment : closedSegments) {
-      total += segment.totalByteCount();
-    }
-    return total;
+    long totalFromClosed = closedSegments.stream().mapToLong(SegmentState::totalByteCount).sum();
+    return totalFromClosed + currentSegment.totalByteCount();
   }
 
-  public int getTotalSegmentCount() {
-    return closedSegments.size() + 1; // closed + current
+  public long getTotalSegmentCount() {
+    return closedSegments.size() + 1;
   }
 
   public boolean isCurrentSegmentEmpty() {
@@ -103,9 +106,13 @@ public record WalSnapshot(
     if (closedSegments.isEmpty()) {
       return currentSegment.createdAtTimestamp();
     }
-    return closedSegments.getFirst().createdAtTimestamp();
+    return closedSegments.stream()
+        .mapToLong(SegmentState::createdAtTimestamp)
+        .min()
+        .orElse(currentSegment.createdAtTimestamp());
   }
 
+  /** Helper: Age of current segment in milliseconds. */
   public long getCurrentSegmentAgeMillis() {
     return snapshotTimeMs - currentSegment.createdAtTimestamp();
   }

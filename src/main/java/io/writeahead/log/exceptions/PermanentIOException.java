@@ -16,7 +16,7 @@ public final class PermanentIOException extends WalException {
 
   @Override
   public boolean indicatesDataLoss() {
-    return false; // Not yet lost, but might be if we retry
+    return false;
   }
 
   @Override

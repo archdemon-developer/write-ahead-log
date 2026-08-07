@@ -1,7 +1,9 @@
 package io.writeahead.log.config;
 
 public class WalConstants {
-  private WalConstants() {}
+  private WalConstants() {
+    throw new IllegalAccessError("private class");
+  }
 
   public static final String LOG_FILE_DATE_FORMAT = "YYYY-MM-DD-HHMMSS";
   public static final int SEGMENT_HEADER_SIZE = 48;
