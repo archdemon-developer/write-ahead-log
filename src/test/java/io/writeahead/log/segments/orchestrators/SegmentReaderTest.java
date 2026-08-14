@@ -29,8 +29,8 @@ class SegmentReaderTest {
   private SimpleWalMetrics metrics;
   private String logDir;
 
-  private static final int HEADER_SIZE = 48; // SEGMENT_HEADER_SIZE
-  private static final int FOOTER_SIZE = 36; // SEGMENT_FOOTER_SIZE
+  private static final int HEADER_SIZE = 48;
+  private static final int FOOTER_SIZE = 36;
 
   @BeforeEach
   void setUp() throws IOException {
@@ -88,13 +88,11 @@ class SegmentReaderTest {
 
   @Test
   void testReadMissingSegmentFile() throws IOException {
-    // Add metadata but don't create file
     segmentCollection.add(
         new SegmentMetadata("wal-1000-000001.log", 1, 1000, 200, 10, 5000L, 6000L));
 
     List<LogEntry> entries = reader.readAllSegments();
 
-    // Should handle missing file gracefully
     assertEquals(0, entries.size());
   }
 
@@ -108,7 +106,6 @@ class SegmentReaderTest {
 
   @Test
   void testReadSingleSegmentFile() throws IOException {
-    // Create a minimal valid segment file (header + footer only, no entries in region)
     File segmentFile = new File(logDir, "wal-1000-000001.log");
     byte[] minimalSegment = createMinimalSegment();
     Files.write(segmentFile.toPath(), minimalSegment);
@@ -119,13 +116,11 @@ class SegmentReaderTest {
 
     List<LogEntry> entries = reader.readAllSegments();
 
-    // Metadata says 1 entry, but region is empty, so reads 0
     assertEquals(0, entries.size());
   }
 
   @Test
   void testReadMultipleSegments() throws IOException {
-    // Create two minimal segments
     File seg1 = new File(logDir, "wal-1000-000001.log");
     File seg2 = new File(logDir, "wal-1001-000002.log");
     byte[] minimal = createMinimalSegment();
@@ -139,7 +134,7 @@ class SegmentReaderTest {
 
     List<LogEntry> entries = reader.readAllSegments();
 
-    assertEquals(0, entries.size()); // Metadata says 1 entry each, but region is empty
+    assertEquals(0, entries.size());
   }
 
   @Test
@@ -163,14 +158,11 @@ class SegmentReaderTest {
     byte[] minimal = createMinimalSegment();
     Files.write(segmentFile.toPath(), minimal);
 
-    // Segment has timestamp range 5000-6000
     segmentCollection.add(
         new SegmentMetadata("wal-1000-000001.log", 1, 1000, minimal.length, 1, 5000L, 6000L));
 
-    // Filter for timestamps >= 7000 (after segment range)
     AfterTimestampFilter filter = new AfterTimestampFilter(7000L);
 
-    // This filter's canSkipSegment should return true
     assertTrue(filter.canSkipSegment(segmentCollection.getSegments().get(0)));
   }
 
@@ -219,7 +211,7 @@ class SegmentReaderTest {
 
     List<LogEntry> entries = reader.readAllSegments();
 
-    assertEquals(0, entries.size()); // Metadata says 1 entry, but entry region is empty
+    assertEquals(0, entries.size());
   }
 
   @Test
@@ -253,7 +245,6 @@ class SegmentReaderTest {
 
   @Test
   void testReadOutOfOrderSegments() throws IOException {
-    // Add segments out of order in collection
     File seg1 = new File(logDir, "wal-1002-000003.log");
     File seg2 = new File(logDir, "wal-1000-000001.log");
     File seg3 = new File(logDir, "wal-1001-000002.log");
@@ -262,7 +253,6 @@ class SegmentReaderTest {
     Files.write(seg2.toPath(), minimal);
     Files.write(seg3.toPath(), minimal);
 
-    // Add in out-of-order
     segmentCollection.add(
         new SegmentMetadata("wal-1002-000003.log", 3, 1002, minimal.length, 1, 7000L, 8000L));
     segmentCollection.add(
@@ -299,8 +289,6 @@ class SegmentReaderTest {
         new SegmentMetadata("wal-1000-000001.log", 1, 1000, minimal.length, 1, 5000L, 6000L));
 
     List<LogEntry> entries = reader.readAllSegments();
-
-    // Metadata says 1 entry, but entry region is empty
     assertEquals(0, entries.size());
   }
 
@@ -318,15 +306,11 @@ class SegmentReaderTest {
     assertEquals(0, entries.size());
   }
 
-  /** Helper: Creates a minimal valid segment with header + footer but no entries */
   private byte[] createMinimalSegment() {
-    // Create array with header + footer
     byte[] segment = new byte[HEADER_SIZE + FOOTER_SIZE];
 
-    // Header: magic byte at 0
-    segment[0] = (byte) 0xAA; // Magic byte
+    segment[0] = (byte) 0xAA;
 
-    // Minimal is 84 bytes total (48 header + 36 footer)
     return segment;
   }
 }

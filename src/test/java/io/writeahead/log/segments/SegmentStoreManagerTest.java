@@ -59,7 +59,6 @@ class SegmentStoreManagerTest {
 
   @Test
   void testInitializationRecovery() throws IOException {
-    // Manager should successfully initialize even with empty directory
     assertTrue(manager.isOpen());
     assertEquals(0, manager.getSegments().size());
   }
@@ -147,11 +146,9 @@ class SegmentStoreManagerTest {
     manager.appendDirectly(new LogEntry(50, new byte[50], timestamp));
     manager.writeBatch();
 
-    // Need at least 2 segments to truncate one
     manager.appendDirectly(new LogEntry(50, new byte[50], timestamp + 1000));
     manager.writeBatch();
 
-    // Force rotation by exceeding segment size
     for (int i = 0; i < 1000; i++) {
       manager.appendDirectly(new LogEntry(50, new byte[50], timestamp + 2000 + i));
     }
@@ -172,7 +169,6 @@ class SegmentStoreManagerTest {
     manager.appendDirectly(new LogEntry(50, new byte[50], timestamp + 1000));
     manager.writeBatch();
 
-    // Force rotation
     for (int i = 0; i < 1000; i++) {
       manager.appendDirectly(new LogEntry(50, new byte[50], timestamp + 2000 + i));
     }
@@ -210,7 +206,7 @@ class SegmentStoreManagerTest {
   void testGetCurrentStreamSize() throws IOException {
     long size = manager.getCurrentStreamSize();
 
-    assertEquals(48, size); // SEGMENT_HEADER_SIZE
+    assertEquals(48, size);
   }
 
   @Test
@@ -315,15 +311,12 @@ class SegmentStoreManagerTest {
 
   @Test
   void testCloseIdempotent() throws IOException {
-    // First close when already open
     CloseResult result1 = manager.close();
     assertTrue(result1.success());
     assertFalse(manager.isOpen());
 
-    // Second close when already closed - should also succeed
     CloseResult result2 = manager.close();
 
-    // Second close returns early without writing, with 0 segments
     assertTrue(result2.success());
     assertEquals(0, result2.totalSegmentsAtClose());
     assertEquals(0, result2.oldestSegmentSequence());
@@ -332,12 +325,10 @@ class SegmentStoreManagerTest {
 
   @Test
   void testCloseWithNoSegments() throws IOException {
-    // Close without writing any entries
     CloseResult result = manager.close();
 
     assertTrue(result.success());
     assertEquals(0, result.totalSegmentsAtClose());
-    // When 0 segments, sequences must be 0
     assertEquals(0, result.oldestSegmentSequence());
     assertEquals(0, result.newestSegmentSequence());
   }
@@ -345,7 +336,6 @@ class SegmentStoreManagerTest {
   @Test
   void testGetSegmentState() throws IOException {
     long timestamp = System.currentTimeMillis();
-    // Write entries so segment has valid state
     manager.appendDirectly(new LogEntry(50, new byte[50], timestamp));
     manager.writeBatch();
 
@@ -397,7 +387,6 @@ class SegmentStoreManagerTest {
 
     List<LogEntry> entries = manager.readAllSegments();
 
-    // Entry is in segment, should be readable
     assertNotNull(entries);
   }
 
@@ -426,7 +415,6 @@ class SegmentStoreManagerTest {
 
     assertFalse(manager.isOpen());
 
-    // State accessors should still work after close
     long seqAfter = manager.getCurrentSequenceNumber();
     assertEquals(seqBefore, seqAfter);
   }
@@ -440,7 +428,7 @@ class SegmentStoreManagerTest {
     WalMetricsQuery metrics = manager.getMetrics();
 
     assertNotNull(metrics);
-    // Metrics should have recorded activity
+
     assertTrue(metrics.getTotalFsyncs() >= 0);
   }
 
@@ -453,7 +441,6 @@ class SegmentStoreManagerTest {
     int segmentsBeforeClose = manager.getSegments().size();
     manager.close();
 
-    // Reinitialize manager from same directory
     SegmentStoreManager manager2 = new SegmentStoreManager(walConfig);
 
     int segmentsAfterRecovery = manager2.getSegments().size();

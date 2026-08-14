@@ -11,21 +11,19 @@ import io.writeahead.log.metrics.WalMetricsRecorder;
 import io.writeahead.log.models.*;
 import io.writeahead.log.models.meta.SegmentMetadata;
 import io.writeahead.log.models.results.AppendResult;
-import io.writeahead.log.models.results.BatchFlushResult;
 import io.writeahead.log.models.states.BatchState;
 import io.writeahead.log.models.states.RotationDecision;
 import io.writeahead.log.models.states.SegmentFinalizationData;
 import io.writeahead.log.models.states.SegmentState;
 import io.writeahead.log.segments.management.SegmentLifecycleManager;
-import io.writeahead.log.segments.operators.BatchBuffer;
 import io.writeahead.log.segments.operators.SegmentCollection;
 import io.writeahead.log.segments.policies.RotationPolicy;
 import io.writeahead.log.serdes.EntrySerdes;
 import io.writeahead.log.utils.Crc32Utils;
 import io.writeahead.log.utils.FileUtils;
 import io.writeahead.log.utils.WalErrorClassifier;
+import java.io.File;
 import java.io.IOException;
-import java.util.List;
 
 public class SegmentWriter {
 
@@ -36,15 +34,14 @@ public class SegmentWriter {
   private final SegmentCollection segmentCollection;
 
   private long nextSegmentSequence;
-  private long currentSequenceNumber;
-  private FileStream currentStream;
-  private long currentStreamSize;
-  private int currentEntryCount;
-  private long currentMinTimestamp;
-  private long currentMaxTimestamp;
-  private long currentSegmentCreatedAt;
 
-  private final BatchBuffer batchBuffer;
+  private volatile long currentSequenceNumber;
+  private volatile FileStream currentStream;
+  private volatile long currentStreamSize;
+  private volatile int currentEntryCount;
+  private volatile long currentMinTimestamp;
+  private volatile long currentMaxTimestamp;
+  private volatile long currentSegmentCreatedAt;
 
   private FsyncExecutor fsyncExecutor;
 
@@ -57,7 +54,6 @@ public class SegmentWriter {
       WalConfiguration config,
       SegmentCollection segmentCollection,
       long nextSegmentSequence,
-      BatchBuffer batchBuffer,
       FsyncRetryStrategy fsyncRetryStrategy,
       WalMetricsRecorder metrics,
       RotationPolicy rotationPolicy)
@@ -66,7 +62,6 @@ public class SegmentWriter {
     this.config = config;
     this.segmentCollection = segmentCollection;
     this.nextSegmentSequence = nextSegmentSequence;
-    this.batchBuffer = batchBuffer;
     this.fsyncRetryStrategy = fsyncRetryStrategy;
     this.metrics = metrics;
     this.rotationPolicy = rotationPolicy;
@@ -89,21 +84,6 @@ public class SegmentWriter {
   }
 
   public AppendResult writeBatch() throws IOException {
-    if (!batchBuffer.isEmpty()) {
-      BatchFlushResult flushResult = batchBuffer.writeBatch();
-      List<LogEntry> entriesToWrite = flushResult.entries();
-
-      for (LogEntry entry : entriesToWrite) {
-        writeEntryToStream(entry);
-
-        try {
-          fsyncExecutor.onEntryWritten();
-        } catch (IOException ex) {
-          throw WalErrorClassifier.classifyIOException(ex, "fsync after entry write");
-        }
-      }
-    }
-
     try {
       fsyncExecutor.onBatchComplete();
     } catch (IOException ex) {
@@ -131,64 +111,8 @@ public class SegmentWriter {
         currentSequenceNumber,
         currentEntryCount,
         currentStreamSize,
-        currentMinTimestamp,
-        currentMaxTimestamp);
-  }
-
-  private void flushAndFsync() throws IOException {
-    if (batchBuffer.isEmpty()) {
-      return;
-    }
-
-    BatchFlushResult flushResult = batchBuffer.writeBatch();
-    List<LogEntry> entriesToWrite = flushResult.entries();
-
-    for (LogEntry entry : entriesToWrite) {
-      long crc = Crc32Utils.computeEntryCrc(entry.timestamp(), entry.data().length, entry.data());
-      byte[] entryBytes =
-          EntrySerdes.serializeEntryWithCrc(
-              entry.timestamp(), entry.data().length, entry.data(), crc);
-      try {
-        FileUtils.writeToStream(currentStream, entryBytes);
-      } catch (IOException ex) {
-        throw WalErrorClassifier.classifyIOException(ex, "write entry to segment");
-      }
-
-      currentStreamSize += entryBytes.length;
-      currentEntryCount++;
-      currentMinTimestamp = Math.min(currentMinTimestamp, entry.timestamp());
-      currentMaxTimestamp = Math.max(currentMaxTimestamp, entry.timestamp());
-
-      try {
-        fsyncExecutor.onEntryWritten();
-      } catch (IOException ex) {
-        throw WalErrorClassifier.classifyIOException(ex, "fsync after entry write");
-      }
-      metrics.recordEntryAppended(entry.data().length);
-    }
-
-    try {
-      fsyncExecutor.onBatchComplete();
-    } catch (IOException ex) {
-      throw WalErrorClassifier.classifyIOException(ex, "fsync after batch complete");
-    }
-
-    SegmentState currentSegState =
-        new SegmentState(
-            currentSequenceNumber,
-            currentEntryCount,
-            currentStreamSize,
-            currentMinTimestamp,
-            currentMaxTimestamp,
-            currentSegmentCreatedAt,
-            false);
-
-    RotationDecision rotationDecision =
-        segmentCollection.shouldRotate(rotationPolicy, currentSegState, config.maxSegmentSize());
-
-    if (rotationDecision.needsRotation()) {
-      rotateSegment();
-    }
+        currentEntryCount > 0 ? currentMinTimestamp : 0L,
+        currentEntryCount > 0 ? currentMaxTimestamp : 0L);
   }
 
   private void rotateSegment() throws IOException {
@@ -256,23 +180,34 @@ public class SegmentWriter {
     return currentSegmentCreatedAt;
   }
 
+  public String getCurrentSegmentFilename() {
+    return SegmentLifecycleManager.generateSegmentFilename(currentSequenceNumber);
+  }
+
   public BatchState getBatchState() {
-    return batchBuffer.getBatchState();
+    if (currentEntryCount == 0) {
+      return BatchState.emptyBatch();
+    }
+    return BatchState.withPendingEntries(
+        currentEntryCount,
+        currentStreamSize - WalConstants.SEGMENT_HEADER_SIZE,
+        currentMinTimestamp,
+        currentMaxTimestamp);
   }
 
   public void close() throws IOException {
-    if (!batchBuffer.isEmpty()) {
-      writeBatch();
-    }
-
     if (currentEntryCount == 0) {
-      log.warn("Segment {} has 0 entries, skipping finalization", currentSequenceNumber);
+      log.warn("Segment {} has 0 entries, deleting empty file", currentSequenceNumber);
       try {
         if (currentStream != null) {
           currentStream.closeAll();
         }
       } catch (IOException ex) {
         log.error("Failed to close empty segment stream", ex);
+      }
+      File emptyFile = new File(config.logDir(), getCurrentSegmentFilename());
+      if (emptyFile.exists() && !emptyFile.delete()) {
+        log.warn("Failed to delete zero-entry segment file: {}", emptyFile.getName());
       }
       return;
     }

@@ -6,6 +6,7 @@ import io.writeahead.log.logging.LoggerFactory;
 import io.writeahead.log.metrics.WalMetricsQuery;
 import io.writeahead.log.models.LogEntry;
 import io.writeahead.log.models.results.AppendResult;
+import io.writeahead.log.models.results.TruncateResult;
 import io.writeahead.log.models.states.BatchState;
 import io.writeahead.log.models.states.WalSnapshot;
 import io.writeahead.log.segments.SegmentStoreManager;
@@ -36,6 +37,7 @@ public class WriteAheadLog {
   private long flushedLsn = 0;
 
   private volatile boolean shutdownRequested = false;
+  private volatile Throwable writerCrashCause = null;
 
   public WriteAheadLog(WalConfiguration config) throws IOException {
     this.config = config;
@@ -43,7 +45,22 @@ public class WriteAheadLog {
 
     this.executor = Executors.newVirtualThreadPerTaskExecutor();
     this.writeQueue = new LinkedBlockingQueue<>(config.batchSize() * 2);
-    executor.submit(this::writerLoop);
+
+    executor.submit(
+        () -> {
+          try {
+            writerLoop();
+          } catch (Throwable t) {
+            writerCrashCause = t;
+            shutdownRequested = true;
+            lsnLock.lock();
+            try {
+              lsnFlushed.signalAll();
+            } finally {
+              lsnLock.unlock();
+            }
+          }
+        });
 
     log.info(
         "WriteAheadLog initialized: logDir={}, batchSize={}, maxSegmentSize={}",
@@ -53,18 +70,19 @@ public class WriteAheadLog {
   }
 
   public AppendResult append(LogEntry entry) throws IOException {
-    if (shutdownRequested) {
-      throw new IOException("WriteAheadLog is closed");
-    }
+    checkOpen();
 
     try {
       long myLsn = allocateLsn(entry.size());
-      writeQueue.put(new WriteTask(entry, myLsn));
+      if (!writeQueue.offer(new WriteTask(entry, myLsn), 5, TimeUnit.SECONDS)) {
+        checkOpen();
+        throw new IOException("Write queue full — writer thread stalled");
+      }
 
       long minTs = segmentStore.getCurrentMinTimestamp();
       long maxTs = segmentStore.getCurrentMaxTimestamp();
 
-      if(minTs == Long.MAX_VALUE || maxTs == Long.MIN_VALUE) {
+      if (minTs == Long.MAX_VALUE || maxTs == Long.MIN_VALUE) {
         minTs = entry.timestamp();
         maxTs = entry.timestamp();
       }
@@ -83,9 +101,7 @@ public class WriteAheadLog {
   }
 
   public AppendResult writeBatch() throws IOException {
-    if (shutdownRequested) {
-      throw new IOException("WriteAheadLog is closed");
-    }
+    checkOpen();
 
     lsnLock.lock();
     try {
@@ -93,23 +109,27 @@ public class WriteAheadLog {
 
       while (flushedLsn < targetLsn) {
         try {
-          boolean timedOut = lsnFlushed.await(1, TimeUnit.SECONDS);
-
-          if (shutdownRequested) {
-            throw new IOException("WriteAheadLog is closed");
-          }
+          lsnFlushed.await(1, TimeUnit.SECONDS);
         } catch (InterruptedException e) {
           Thread.currentThread().interrupt();
           throw new IOException("Interrupted waiting for flush", e);
         }
+        Throwable crash = writerCrashCause;
+        if (crash != null) {
+          throw new IOException("WriteAheadLog writer crashed", crash);
+        }
+        if (shutdownRequested && flushedLsn < targetLsn) {
+          throw new IOException("WriteAheadLog is closed");
+        }
       }
 
+      long entryCount = segmentStore.getCurrentEntryCount();
       return AppendResult.successfulAppendWithFlush(
           segmentStore.getCurrentSequenceNumber(),
-          segmentStore.getCurrentEntryCount(),
+          entryCount,
           segmentStore.getCurrentStreamSize(),
-          segmentStore.getCurrentMinTimestamp(),
-          segmentStore.getCurrentMaxTimestamp());
+          entryCount > 0 ? segmentStore.getCurrentMinTimestamp() : 0L,
+          entryCount > 0 ? segmentStore.getCurrentMaxTimestamp() : 0L);
 
     } finally {
       lsnLock.unlock();
@@ -122,6 +142,11 @@ public class WriteAheadLog {
 
   public List<LogEntry> readAllAfterTimestamp(long timestamp) throws IOException {
     return segmentStore.readAllAfterTimestamp(timestamp);
+  }
+
+  public TruncateResult truncateBeforeTimestamp(long timestamp) throws IOException {
+    checkOpen();
+    return segmentStore.truncateBeforeTimestamp(timestamp);
   }
 
   public WalSnapshot getSnapshot() throws IOException {
@@ -157,9 +182,18 @@ public class WriteAheadLog {
     log.info("WriteAheadLog closed");
   }
 
+  private void checkOpen() throws IOException {
+    Throwable crash = writerCrashCause;
+    if (crash != null) {
+      throw new IOException("WriteAheadLog writer crashed", crash);
+    }
+    if (shutdownRequested) {
+      throw new IOException("WriteAheadLog is closed");
+    }
+  }
+
   private void writerLoop() {
     log.info("WriteAheadLog writer thread started");
-
     List<WriteTask> batch = new ArrayList<>();
 
     try {
@@ -170,15 +204,25 @@ public class WriteAheadLog {
           WriteTask first = writeQueue.poll(100, TimeUnit.MILLISECONDS);
 
           if (first == null) {
-            int pending = segmentStore.getCurrentEntryCount();
-            if (pending > 0) {
-              flushBatch(batch);
+            lsnLock.lock();
+            try {
+              if (flushedLsn < currentLsn) {
+                lsnLock.unlock();
+                try {
+                  segmentStore.writeBatch();
+                } finally {
+                  lsnLock.lock();
+                }
+                flushedLsn = currentLsn;
+                lsnFlushed.signalAll();
+              }
+            } finally {
+              lsnLock.unlock();
             }
             continue;
           }
 
           batch.add(first);
-
           writeQueue.drainTo(batch, config.batchSize() - 1);
 
           for (WriteTask task : batch) {
@@ -198,33 +242,48 @@ public class WriteAheadLog {
         }
       }
 
+      batch.clear();
+      writeQueue.drainTo(batch);
+      for (WriteTask task : batch) {
+        segmentStore.appendDirectly(task.entry());
+      }
       if (!batch.isEmpty()) {
         flushBatch(batch);
+      } else {
+        lsnLock.lock();
+        try {
+          if (flushedLsn < currentLsn) {
+            lsnLock.unlock();
+            try {
+              segmentStore.writeBatch();
+            } finally {
+              lsnLock.lock();
+            }
+            flushedLsn = currentLsn;
+            lsnFlushed.signalAll();
+          }
+        } finally {
+          lsnLock.unlock();
+        }
       }
 
       log.info("WriteAheadLog writer thread exited cleanly");
 
     } catch (IOException e) {
       log.error("WriteAheadLog writer thread crashed: {}", e.getMessage(), e);
-      shutdownRequested = true;
       throw new RuntimeException("WriteAheadLog writer thread failed", e);
     }
   }
 
   private void flushBatch(List<WriteTask> batch) throws IOException {
-    if (batch.isEmpty()) {
-      return;
-    }
-
     segmentStore.writeBatch();
 
     lsnLock.lock();
     try {
       WriteTask lastTask = batch.getLast();
-      long lastLsn = lastTask.lsn() + lastTask.entry().size();
-      flushedLsn = Math.max(flushedLsn, lastLsn);
+      long newFlushedLsn = lastTask.lsn() + lastTask.entry().size();
+      flushedLsn = Math.max(flushedLsn, newFlushedLsn);
       lsnFlushed.signalAll();
-
       log.debug("Flushed batch of {} entries, LSN now {}", batch.size(), flushedLsn);
     } finally {
       lsnLock.unlock();

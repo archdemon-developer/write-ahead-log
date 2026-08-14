@@ -112,7 +112,6 @@ class RotationPolicyFactoryTest {
     @Test
     @DisplayName("factory uses switch expression")
     void factoryUsesSwitchExpression() {
-      // Verify all RotationPolicyType values are handled by the factory
       for (RotationPolicyType type : RotationPolicyType.values()) {
         assertDoesNotThrow(
             () -> RotationPolicyFactory.create(type), "Factory should handle " + type.name());

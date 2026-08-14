@@ -39,7 +39,7 @@ public record WalSnapshot(
       List<SegmentMetadata> closedSegmentMetadata,
       long currentSequenceNumber,
       long currentEntryCount,
-      int currentStreamSize,
+      long currentStreamSize,
       long currentMinTimestamp,
       long currentMaxTimestamp,
       long currentSegmentCreatedAt,
@@ -62,13 +62,15 @@ public record WalSnapshot(
                         true))
             .toList();
 
+    long normalizedMin = currentEntryCount > 0 ? currentMinTimestamp : Long.MIN_VALUE;
+    long normalizedMax = currentEntryCount > 0 ? currentMaxTimestamp : Long.MAX_VALUE;
     SegmentState currentSegment =
         new SegmentState(
             currentSequenceNumber,
             currentEntryCount,
             currentStreamSize,
-            currentMinTimestamp,
-            currentMaxTimestamp,
+            normalizedMin,
+            normalizedMax,
             currentSegmentCreatedAt,
             false);
 

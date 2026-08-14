@@ -13,7 +13,6 @@ import io.writeahead.log.models.meta.SegmentMetadata;
 import io.writeahead.log.models.results.AppendResult;
 import io.writeahead.log.models.states.BatchState;
 import io.writeahead.log.segments.management.SegmentLifecycleManager;
-import io.writeahead.log.segments.operators.BatchBuffer;
 import io.writeahead.log.segments.operators.SegmentCollection;
 import io.writeahead.log.segments.policies.RotationPolicy;
 import io.writeahead.log.segments.policies.RotationPolicyFactory;
@@ -33,22 +32,19 @@ class SegmentWriterTest {
   private WalConfiguration walConfig;
   private SegmentCollection segmentCollection;
   private SimpleWalMetrics metrics;
-  private BatchBuffer batchBuffer;
   private FsyncRetryStrategy fsyncRetryStrategy;
   private RotationPolicy rotationPolicy;
 
   @BeforeEach
   void setUp() throws IOException {
-    // Create log directory
     String logDir = tempDir.toString();
     Files.createDirectories(tempDir);
 
-    // Build configuration
     walConfig =
         new WalConfiguration.Builder()
             .logDir(logDir)
             .batchSize(10)
-            .maxSegmentSize(1024) // Small for testing rotation
+            .maxSegmentSize(1024)
             .fsyncStrategy(FsyncStrategy.FSYNC_EVERY_BATCH)
             .rotationPolicyType(RotationPolicyType.SIZE_BASED)
             .maxRetries(3)
@@ -59,18 +55,15 @@ class SegmentWriterTest {
     metrics = new SimpleWalMetrics();
     lifecycleManager = new SegmentLifecycleManager(logDir);
     segmentCollection = new SegmentCollection();
-    batchBuffer = new BatchBuffer();
     fsyncRetryStrategy = FsyncRetryStrategyFactory.create(walConfig, metrics);
     rotationPolicy = RotationPolicyFactory.create(walConfig.rotationPolicyType());
 
-    // Create writer with sequence 1
     writer =
         new SegmentWriter(
             lifecycleManager,
             walConfig,
             segmentCollection,
             1,
-            batchBuffer,
             fsyncRetryStrategy,
             metrics,
             rotationPolicy);
@@ -105,7 +98,6 @@ class SegmentWriterTest {
             walConfig,
             segmentCollection,
             42,
-            new BatchBuffer(),
             fsyncRetryStrategy,
             metrics,
             rotationPolicy);
@@ -141,7 +133,7 @@ class SegmentWriterTest {
 
   @Test
   void testWriteBatchReturnsAppendResult() throws IOException {
-    batchBuffer.append(new LogEntry(5, new byte[5], System.currentTimeMillis()));
+    writer.appendDirectly(new LogEntry(5, new byte[5], System.currentTimeMillis()));
     AppendResult result = writer.writeBatch();
 
     assertNotNull(result);
@@ -152,36 +144,21 @@ class SegmentWriterTest {
   void testWriteBatchFlushesMultipleTimes() throws IOException {
     long timestamp = System.currentTimeMillis();
 
-    // First: append and flush
     writer.appendDirectly(new LogEntry(5, new byte[5], timestamp));
-    batchBuffer.append(new LogEntry(5, new byte[5], timestamp));
     AppendResult result1 = writer.writeBatch();
     assertTrue(result1.flushed());
 
-    // Second: append and flush again
-    batchBuffer.append(new LogEntry(5, new byte[5], timestamp + 1));
+    writer.appendDirectly(new LogEntry(5, new byte[5], timestamp + 1));
     AppendResult result2 = writer.writeBatch();
     assertTrue(result2.flushed());
   }
 
   @Test
-  void testWriteBatchFlushesBuffer() throws IOException {
-    batchBuffer.append(new LogEntry(5, new byte[5], System.currentTimeMillis()));
-    assertTrue(batchBuffer.size() > 0);
-
-    writer.writeBatch();
-
-    assertTrue(batchBuffer.isEmpty());
-  }
-
-  @Test
   void testWriteBatchMultipleTimes() throws IOException {
     for (int i = 0; i < 3; i++) {
-      batchBuffer.append(new LogEntry(5, new byte[5], System.currentTimeMillis()));
+      writer.appendDirectly(new LogEntry(5, new byte[5], System.currentTimeMillis()));
       AppendResult result = writer.writeBatch();
-
       assertTrue(result.flushed());
-      assertTrue(batchBuffer.isEmpty());
     }
   }
 
@@ -227,12 +204,10 @@ class SegmentWriterTest {
 
   @Test
   void testCloseWithEntries() throws IOException {
-    // Write large enough entry so file size >= 84 (header 48 + entry bytes + footer 36)
     long timestamp = System.currentTimeMillis();
     writer.appendDirectly(new LogEntry(50, new byte[50], timestamp));
     writer.close();
 
-    // After closing, segment should be added to collection
     assertEquals(1, segmentCollection.size());
   }
 
@@ -240,21 +215,7 @@ class SegmentWriterTest {
   void testCloseEmptySegment() throws IOException {
     writer.close();
 
-    // Empty segment (0 entries) should not be added
     assertEquals(0, segmentCollection.size());
-  }
-
-  @Test
-  void testCloseFlushesEmptyBatch() throws IOException {
-    long timestamp = System.currentTimeMillis();
-    // Write directly to writer first to establish segment state
-    writer.appendDirectly(new LogEntry(50, new byte[50], timestamp));
-    // Now add to batch
-    batchBuffer.append(new LogEntry(10, new byte[10], timestamp));
-    writer.close();
-
-    // Batch should be flushed before close
-    assertTrue(batchBuffer.isEmpty());
   }
 
   @Test
@@ -296,7 +257,6 @@ class SegmentWriterTest {
     writer.appendDirectly(new LogEntry(5, new byte[5], ts2));
     writer.appendDirectly(new LogEntry(5, new byte[5], ts3));
 
-    // Min should be ts1, max should be ts2
     assertEquals(ts1, writer.getCurrentMinTimestamp());
     assertEquals(ts2, writer.getCurrentMaxTimestamp());
   }
@@ -315,7 +275,7 @@ class SegmentWriterTest {
 
   @Test
   void testWriteBatchReturnsValidSequenceNumber() throws IOException {
-    batchBuffer.append(new LogEntry(5, new byte[5], System.currentTimeMillis()));
+    writer.appendDirectly(new LogEntry(5, new byte[5], System.currentTimeMillis()));
     AppendResult result = writer.writeBatch();
 
     assertEquals(1, result.currentSegmentSequenceNumber());
@@ -324,8 +284,6 @@ class SegmentWriterTest {
   @Test
   void testWriteBatchReturnsValidEntryCount() throws IOException {
     writer.appendDirectly(new LogEntry(5, new byte[5], System.currentTimeMillis()));
-    batchBuffer.append(new LogEntry(5, new byte[5], System.currentTimeMillis()));
-
     AppendResult result = writer.writeBatch();
 
     assertTrue(result.currentSegmentEntryCount() >= 1);
@@ -334,8 +292,6 @@ class SegmentWriterTest {
   @Test
   void testWriteBatchReturnsValidByteCount() throws IOException {
     writer.appendDirectly(new LogEntry(5, new byte[5], System.currentTimeMillis()));
-    batchBuffer.append(new LogEntry(5, new byte[5], System.currentTimeMillis()));
-
     AppendResult result = writer.writeBatch();
 
     assertTrue(result.currentSegmentByteCount() >= 48);
@@ -343,7 +299,7 @@ class SegmentWriterTest {
 
   @Test
   void testAppendResultNoCorruptionInitially() throws IOException {
-    batchBuffer.append(new LogEntry(5, new byte[5], System.currentTimeMillis()));
+    writer.appendDirectly(new LogEntry(5, new byte[5], System.currentTimeMillis()));
     AppendResult result = writer.writeBatch();
 
     assertFalse(result.corruptionDetected());

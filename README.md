@@ -2,20 +2,19 @@
 
 A single-node write-ahead log implementation in pure Java. Built from scratch to understand durability, atomicity, and crash recovery in database systems.
 
-**Status:** ✅ Phases 1-6.75 Complete | 🔧 Refactoring in Progress
+**Status:** ✅ Complete — single-node implementation in maintenance mode
 
 ## What This Is
 
 A durable log that:
 - Guarantees atomic writes with CRC32 validation
 - Recovers deterministically from crashes
-- Handles concurrent access safely
-- Provides time-based queries
+- Handles concurrent access safely (single virtual-thread writer, lock-free reads)
+- Provides time-based queries and timestamp-based log truncation
 
 ## What This Is NOT
 
 - Not a distributed system (single-node only)
-- Not production-ready (a learning artifact)
 - Not a replacement for Kafka/RocksDB
 - Not a full database (just the durability layer)
 
@@ -37,8 +36,9 @@ WalConfiguration config = new WalConfiguration.Builder()
 WriteAheadLog wal = new WriteAheadLog(config);
 LogEntry entry = new LogEntry(data.length, data, System.currentTimeMillis());
 
-wal.append(entry);           // Buffered in memory
-wal.close();                 // Flushed to disk with fsync
+wal.append(entry);                               // Enqueued for writer thread
+wal.writeBatch();                                // Block until flushed to disk
+wal.truncateBeforeTimestamp(cutoffMillis);       // Reclaim disk space
 
 // After crash recovery...
 WriteAheadLog wal2 = new WriteAheadLog(config);
@@ -48,17 +48,17 @@ List<LogEntry> recovered = wal2.readAllSegments();  // All safe on disk
 ## Architecture
 
 ```
-WriteAheadLog (thread-safe batching with ReadWriteLock)
+WriteAheadLog (single virtual-thread writer, lock-free reads, LSN-based flush signaling)
     ↓
-SegmentStore [6 focused interfaces]
+SegmentStoreManager (orchestrates rotation and state tracking)
+    ├─ SegmentLifecycleManager  — creates and finalizes segment files
+    ├─ SegmentWriter            — append-only writes, rotation
+    ├─ SegmentReader            — reads finalized + current open segment
+    ├─ SegmentTruncator         — deletes old segments, updates collection
+    ├─ SegmentMetadataRecovery  — header/footer CRC validation on startup
+    └─ SegmentCollection        — ordered metadata index
     ↓
-SegmentStoreManager (orchestrates rotation, state tracking)
-    ├─ SegmentLifecycleManager
-    ├─ SegmentEntriesReader
-    ├─ SegmentMetadataRecovery
-    └─ SegmentCollection
-    ↓
-Disk (.log segments with embedded metadata)
+Disk (.log segments: 48-byte header + entries + 36-byte footer, all with embedded CRC32)
 ```
 
 ## Key Design Decisions
@@ -69,52 +69,26 @@ Disk (.log segments with embedded metadata)
 | Embedded metadata | Atomic with data, no divergence on crash | PostgreSQL XLOG |
 | CRC32 per entry | ~99.99% corruption detection | PostgreSQL, RocksDB |
 | Batching | 6-10x throughput vs single fsync | RocksDB, Kafka |
-| ReadWriteLock | Prepared for future replication | Kafka broker model |
-| State objects | Rich encapsulation, extensibility | Modern API design |
-| Pluggable filters | Custom logic, segment optimization | Kafka filters |
-| Interface segregation | Clients depend only on needed methods | SOLID ISP |
+| Single virtual-thread writer | No lock contention on the write hot path | Kafka broker model |
+| Lock-free reads | Volatile fields on SegmentWriter | Java Memory Model |
+| Sequence-only filenames | Deterministic naming eliminates coordination hazards | RocksDB SST naming |
+| LSN-based flush signaling | Callers block until their write is durable | PostgreSQL WAL |
+| Write queue timeout | Backpressure propagated to producers after 5s | Kafka producer config |
 
 ## Current State
 
 - ✅ Core durability layer complete
-- ✅ Thread-safe concurrent writes
-- ✅ Crash recovery deterministic
-- ✅ Architecture refactored for extensibility
-- 🔧 Tests being rewritten (after package segregation + refactoring)
+- ✅ Thread-safe concurrent writes (single writer, lock-free reads)
+- ✅ Crash recovery deterministic (header/footer CRC, sequence-only filenames)
+- ✅ Log truncation (timestamp-based, safe space reclamation)
+- ✅ Comprehensive test suite (no mocks, no sleeps)
 
 ## Future Work
 
-### Phase 7: Refactoring & Testing (10-12 weeks)
-
-**Package Segregation**
-- Organize by responsibility: config/, models/, segments/, fsync/, batch/, metrics/, etc.
-
-**Component Extraction**
-- Split SegmentStoreManager into focused classes (SegmentWriter, SegmentReader, SegmentTruncator)
-
-**Java 21 Practices**
-- Sealed exception hierarchy with pattern matching
-- Use records and modern idioms
-
-**Comprehensive Testing**
-- Unit, integration, failure scenario, and stress tests
-- Rewritten test suite for new package structure
-
-**Observability**
-- Structured logging
-- JMH benchmarks (throughput, latency, memory)
-
-**Bug Fixes**
-- Truncation atomicity
-- Schema versioning
-- Backpressure on batch buffer
-- Improved retry logic
-
-### Future: Replication (After Phase 7)
-
+**Replication (beyond single-node scope)**
 - Raft consensus
 - Multi-node failover
-- No refactoring of current architecture needed
+- Leader/follower architecture
 
 ## Acknowledgements
 

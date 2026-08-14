@@ -21,7 +21,6 @@ import io.writeahead.log.segments.filter.reads.ReadFilter;
 import io.writeahead.log.segments.filter.truncate.TruncateFilter;
 import io.writeahead.log.segments.management.SegmentLifecycleManager;
 import io.writeahead.log.segments.management.SegmentMetadataRecovery;
-import io.writeahead.log.segments.operators.BatchBuffer;
 import io.writeahead.log.segments.operators.SegmentCollection;
 import io.writeahead.log.segments.operators.SegmentEntriesReader;
 import io.writeahead.log.segments.orchestrators.SegmentReader;
@@ -31,7 +30,9 @@ import io.writeahead.log.segments.policies.RotationPolicy;
 import io.writeahead.log.segments.policies.RotationPolicyFactory;
 import io.writeahead.log.segments.stores.SegmentStore;
 import io.writeahead.log.utils.WalErrorClassifier;
+import java.io.File;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 
 public class SegmentStoreManager implements SegmentStore {
@@ -42,6 +43,8 @@ public class SegmentStoreManager implements SegmentStore {
 
   private final WalMetricsRecorder metrics;
 
+  private final String logDir;
+
   private final SegmentWriter writer;
   private final SegmentReader reader;
   private final SegmentTruncator truncator;
@@ -49,6 +52,7 @@ public class SegmentStoreManager implements SegmentStore {
   private boolean isOpen;
 
   public SegmentStoreManager(WalConfiguration config) throws IOException {
+    this.logDir = config.logDir();
     this.metrics = new SimpleWalMetrics();
 
     SegmentMetadataRecovery metadataRecovery =
@@ -62,7 +66,6 @@ public class SegmentStoreManager implements SegmentStore {
 
     RotationPolicy rotationPolicy = RotationPolicyFactory.create(config.rotationPolicyType());
     FsyncRetryStrategy fsyncRetryStrategy = FsyncRetryStrategyFactory.create(config, metrics);
-    BatchBuffer batchBuffer = new BatchBuffer();
 
     this.writer =
         new SegmentWriter(
@@ -70,7 +73,6 @@ public class SegmentStoreManager implements SegmentStore {
             config,
             segmentCollection,
             walMetadata.nextSequence(),
-            batchBuffer,
             fsyncRetryStrategy,
             metrics,
             rotationPolicy);
@@ -108,7 +110,12 @@ public class SegmentStoreManager implements SegmentStore {
 
   @Override
   public List<LogEntry> readAllSegments() throws IOException {
-    return reader.readAllSegments();
+    List<LogEntry> all = new ArrayList<>(reader.readAllSegments());
+    if (writer.getCurrentEntryCount() > 0) {
+      all.addAll(
+          reader.readCurrentOpenSegment(new File(logDir, writer.getCurrentSegmentFilename())));
+    }
+    return all;
   }
 
   @Override
@@ -117,7 +124,16 @@ public class SegmentStoreManager implements SegmentStore {
   }
 
   public List<LogEntry> readAllAfterTimestamp(long timestamp) throws IOException {
-    return reader.readAllAfterTimestamp(timestamp);
+    List<LogEntry> all = new ArrayList<>(reader.readAllAfterTimestamp(timestamp));
+    if (writer.getCurrentEntryCount() > 0) {
+      for (LogEntry entry :
+          reader.readCurrentOpenSegment(new File(logDir, writer.getCurrentSegmentFilename()))) {
+        if (entry.timestamp() >= timestamp) {
+          all.add(entry);
+        }
+      }
+    }
+    return all;
   }
 
   @Override
@@ -207,8 +223,8 @@ public class SegmentStoreManager implements SegmentStore {
     return WalSnapshot.of(
         getSegments(),
         getCurrentSequenceNumber(),
-        getCurrentStreamSize(),
         getCurrentEntryCount(),
+        getCurrentStreamSize(),
         getCurrentMinTimestamp(),
         getCurrentMaxTimestamp(),
         getCurrentSegmentCreatedAt(),

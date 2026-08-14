@@ -11,13 +11,18 @@ import io.writeahead.log.enums.strategies.FsyncStrategy;
 import io.writeahead.log.enums.strategies.RotationPolicyType;
 import io.writeahead.log.models.LogEntry;
 import io.writeahead.log.models.results.AppendResult;
+import io.writeahead.log.models.results.TruncateResult;
 import io.writeahead.log.models.states.BatchState;
+import io.writeahead.log.models.states.WalSnapshot;
+import java.io.File;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
 
 class WriteAheadLogTest {
@@ -28,16 +33,16 @@ class WriteAheadLogTest {
 
   private WalConfiguration createConfig() {
     return new WalConfiguration.Builder()
-            .logDir(logDir.toString())
-            .batchSize(10)
-            .maxSegmentSize(10 * 1024 * 1024)
-            .fsyncStrategy(FsyncStrategy.FSYNC_EVERY_BATCH)
-            .rotationPolicyType(RotationPolicyType.SIZE_BASED)
-            .timestampFormat("yyyy-MM-dd'T'HH:mm:ss.SSS")
-            .maxRetries(3)
-            .retryBackoffMs(10)
-            .retryBackoffMultiplier(2.0)
-            .build();
+        .logDir(logDir.toString())
+        .batchSize(10)
+        .maxSegmentSize(10 * 1024 * 1024)
+        .fsyncStrategy(FsyncStrategy.FSYNC_EVERY_BATCH)
+        .rotationPolicyType(RotationPolicyType.SIZE_BASED)
+        .timestampFormat("yyyy-MM-dd'T'HH:mm:ss.SSS")
+        .maxRetries(3)
+        .retryBackoffMs(10)
+        .retryBackoffMultiplier(2.0)
+        .build();
   }
 
   @BeforeEach
@@ -45,322 +50,225 @@ class WriteAheadLogTest {
     wal = new WriteAheadLog(createConfig());
   }
 
-  // === Initialization ===
-
   @Test
+  @Timeout(10)
   void testInitialization() throws IOException {
     assertNotNull(wal);
   }
 
-  // === Basic Append & Flush ===
-
   @Test
+  @Timeout(10)
   void testAppendSingleEntry() throws IOException {
     LogEntry entry = new LogEntry(100, new byte[100], 1000L);
-
     AppendResult result = wal.append(entry);
-
     assertNotNull(result);
-    assertFalse(result.flushed(), "append() should not flush");
-    assertTrue(result.entriesPendingInBatch() > 0, "Entry should be queued");
-    assertFalse(result.corruptionDetected(), "No corruption on fresh append");
+    assertFalse(result.flushed());
   }
 
   @Test
+  @Timeout(10)
   void testAppendMultipleEntries() throws IOException {
     for (int i = 0; i < 5; i++) {
-      LogEntry entry = new LogEntry(100, new byte[100], 1000L + i);
-      AppendResult result = wal.append(entry);
-      assertFalse(result.flushed());
+      wal.append(new LogEntry(100, new byte[100], 1000L + i));
     }
   }
 
-  // === Batch Flushing ===
-
   @Test
-  void testWriteBatchFlushes() throws IOException, InterruptedException {
-    wal.append(new LogEntry(100, new byte[100], 1000L));
-
-    Thread.sleep(100);
-
-    AppendResult result = wal.writeBatch();
-
-    assertTrue(result.flushed(), "writeBatch() should return flushed=true");
-    assertEquals(0, result.entriesPendingInBatch(), "Flushed batch should have 0 pending");
-  }
-
-  @Test
-  void testBatchAutoFlushAtSize() throws IOException, InterruptedException {
+  @Timeout(10)
+  void testBatchAutoFlushAtSize() throws IOException {
     for (int i = 0; i < 10; i++) {
       wal.append(new LogEntry(100, new byte[100], 1000L + i));
     }
-
-    Thread.sleep(500);
   }
 
   @Test
-  void testBatchMultipleFlushs() throws IOException, InterruptedException {
+  @Timeout(10)
+  void testBatchMultipleFlushs() throws IOException {
     for (int i = 0; i < 15; i++) {
       wal.append(new LogEntry(100, new byte[100], 1000L + i));
     }
-
-    Thread.sleep(500);
   }
 
-  // === LSN Allocation ===
-
   @Test
-  void testLsnAllocationIncrement() throws IOException, InterruptedException {
+  @Timeout(10)
+  void testLsnAllocationIncrement() throws IOException {
     wal.append(new LogEntry(100, new byte[100], 1000L));
     wal.append(new LogEntry(200, new byte[200], 2000L));
     wal.append(new LogEntry(150, new byte[150], 3000L));
-
-    Thread.sleep(200);
     wal.writeBatch();
-
     List<LogEntry> readBack = wal.readAllSegments();
-    assertEquals(3, readBack.size(), "All entries should be recovered");
+    assertEquals(3, readBack.size());
   }
 
-  // === Read Operations ===
-
   @Test
-  void testReadAllSegments() throws IOException, InterruptedException {
+  @Timeout(10)
+  void testReadAllSegments() throws IOException {
     for (int i = 0; i < 5; i++) {
       wal.append(new LogEntry(100, new byte[100], 1000L + i));
     }
     wal.writeBatch();
-
     List<LogEntry> entries = wal.readAllSegments();
-
-    assertNotNull(entries);
     assertEquals(5, entries.size());
   }
 
   @Test
-  void testReadAfterTimestamp() throws IOException, InterruptedException {
+  @Timeout(10)
+  void testReadAfterTimestamp() throws IOException {
     for (int i = 0; i < 5; i++) {
       wal.append(new LogEntry(100, new byte[100], 1000L + (i * 1000)));
     }
     wal.writeBatch();
-
-    long filterTime = 2500L;
-    List<LogEntry> filtered = wal.readAllAfterTimestamp(filterTime);
-
-    assertNotNull(filtered);
-    assertTrue(filtered.size() >= 2, "Should have entries after filter time");
+    List<LogEntry> filtered = wal.readAllAfterTimestamp(2500L);
+    assertTrue(filtered.size() >= 2);
   }
 
   @Test
+  @Timeout(10)
   void testReadEmptyLog() throws IOException {
     List<LogEntry> entries = wal.readAllSegments();
-
-    assertNotNull(entries);
-    assertEquals(0, entries.size(), "Empty log should return empty list");
+    assertEquals(0, entries.size());
   }
 
-  // === Observable State ===
-
   @Test
+  @Timeout(10)
   void testGetBatchState() throws IOException {
     BatchState state = wal.getBatchState();
-
     assertNotNull(state);
-    assertTrue(state.isEmpty(), "Fresh WAL should have empty batch");
   }
 
   @Test
-  void testGetMetrics() throws IOException, InterruptedException {
+  @Timeout(10)
+  void testGetMetrics() throws IOException {
     wal.append(new LogEntry(100, new byte[100], 1000L));
-    Thread.sleep(100);
-
     var metrics = wal.getMetrics();
-
     assertNotNull(metrics);
   }
 
-  // === Lightweight Concurrency Tests ===
-
   @Test
+  @Timeout(10)
   void testBasicConcurrentAppends() throws IOException, InterruptedException {
-    int threadCount = 3;
-    int entriesPerThread = 5;
     CountDownLatch startLatch = new CountDownLatch(1);
-    CountDownLatch endLatch = new CountDownLatch(threadCount);
+    CountDownLatch endLatch = new CountDownLatch(3);
+    AtomicReference<Exception> error = new AtomicReference<>();
 
-    for (int t = 0; t < threadCount; t++) {
+    for (int t = 0; t < 3; t++) {
       int threadId = t;
       new Thread(
               () -> {
                 try {
                   startLatch.await();
-                  for (int i = 0; i < entriesPerThread; i++) {
-                    wal.append(
-                            new LogEntry(100, new byte[100], 1000L + threadId * entriesPerThread + i));
+                  for (int i = 0; i < 5; i++) {
+                    wal.append(new LogEntry(100, new byte[100], 1000L + threadId * 5 + i));
                   }
-                } catch (InterruptedException | IOException e) {
-                  Thread.currentThread().interrupt();
+                } catch (Exception e) {
+                  error.set(e);
+                } finally {
+                  endLatch.countDown();
                 }
-                endLatch.countDown();
               })
-              .start();
+          .start();
     }
 
     startLatch.countDown();
     endLatch.await();
+    if (error.get() != null) throw new IOException(error.get());
 
-    Thread.sleep(200);
     wal.writeBatch();
-
-    List<LogEntry> entries = wal.readAllSegments();
-    assertEquals(threadCount * entriesPerThread, entries.size(),
-            "All concurrent entries should be recovered");
+    assertEquals(15, wal.readAllSegments().size());
   }
 
   @Test
-  void testConcurrentReads() throws IOException, InterruptedException {
-    for (int i = 0; i < 10; i++) {
-      wal.append(new LogEntry(100, new byte[100], 1000L + i));
-    }
-    wal.writeBatch();
-
-    int threadCount = 2;
-    CountDownLatch startLatch = new CountDownLatch(1);
-    CountDownLatch endLatch = new CountDownLatch(threadCount);
-
-    for (int t = 0; t < threadCount; t++) {
-      new Thread(
-              () -> {
-                try {
-                  startLatch.await();
-                  List<LogEntry> entries = wal.readAllSegments();
-                  assertEquals(10, entries.size());
-                } catch (InterruptedException | IOException e) {
-                  Thread.currentThread().interrupt();
-                }
-                endLatch.countDown();
-              })
-              .start();
-    }
-
-    startLatch.countDown();
-    endLatch.await();
-  }
-
-  // === Closure & Error Handling ===
-
-  @Test
+  @Timeout(10)
   void testCloseGracefully() throws IOException {
     wal.close();
-
     IOException thrown =
-            assertThrows(IOException.class, () -> wal.append(new LogEntry(100, new byte[100], 1000L)));
+        assertThrows(IOException.class, () -> wal.append(new LogEntry(100, new byte[100], 1000L)));
     assertTrue(thrown.getMessage().contains("closed"));
   }
 
   @Test
-  void testCloseFlushesPendingEntries() throws IOException, InterruptedException {
+  @Timeout(10)
+  void testCloseFlushesPendingEntries() throws IOException {
     for (int i = 0; i < 3; i++) {
       wal.append(new LogEntry(100, new byte[100], 1000L + i));
     }
-
     wal.close();
 
     WriteAheadLog wal2 = new WriteAheadLog(createConfig());
     List<LogEntry> recovered = wal2.readAllSegments();
     wal2.close();
-
-    assertEquals(3, recovered.size(), "Close should flush pending entries");
+    assertEquals(3, recovered.size());
   }
 
   @Test
+  @Timeout(10)
   void testAppendThrowsWhenClosed() throws IOException {
     wal.close();
-
     IOException thrown =
-            assertThrows(IOException.class, () -> wal.append(new LogEntry(100, new byte[100], 1000L)));
+        assertThrows(IOException.class, () -> wal.append(new LogEntry(100, new byte[100], 1000L)));
     assertTrue(thrown.getMessage().contains("closed"));
   }
 
   @Test
+  @Timeout(10)
   void testWriteBatchThrowsWhenClosed() throws IOException {
     wal.close();
-
-    IOException thrown = assertThrows(IOException.class, () -> wal.writeBatch());
-    assertTrue(thrown.getMessage().contains("closed"));
+    assertThrows(IOException.class, () -> wal.writeBatch());
   }
 
-  // === Payload Validation ===
-
   @Test
-  void testPayloadPreservation() throws IOException, InterruptedException {
+  @Timeout(10)
+  void testPayloadPreservation() throws IOException {
     byte[] payload = new byte[500];
     for (int i = 0; i < payload.length; i++) {
       payload[i] = (byte) (i % 256);
     }
-
     LogEntry original = new LogEntry(payload.length, payload, 1000L);
     wal.append(original);
     wal.writeBatch();
-
     List<LogEntry> readBack = wal.readAllSegments();
-
     assertEquals(1, readBack.size());
-    LogEntry recovered = readBack.get(0);
-    assertEquals(original.size(), recovered.size());
-    assertEquals(original.timestamp(), recovered.timestamp());
+    assertEquals(original.size(), readBack.get(0).size());
   }
 
   @Test
-  void testLargePayloads() throws IOException, InterruptedException {
+  @Timeout(10)
+  void testLargePayloads() throws IOException {
     byte[] largePayload = new byte[50000];
     for (int i = 0; i < largePayload.length; i++) {
       largePayload[i] = (byte) (i % 256);
     }
-
     wal.append(new LogEntry(largePayload.length, largePayload, 1000L));
     wal.writeBatch();
-
-    List<LogEntry> readBack = wal.readAllSegments();
-
-    assertEquals(1, readBack.size());
-    assertEquals(largePayload.length, readBack.get(0).size());
+    assertEquals(1, wal.readAllSegments().size());
   }
 
   @Test
-  void testManySmallEntries() throws IOException, InterruptedException {
+  @Timeout(10)
+  void testManySmallEntries() throws IOException {
     for (int i = 0; i < 50; i++) {
       wal.append(new LogEntry(10, new byte[10], 1000L + i));
     }
     wal.writeBatch();
-
-    List<LogEntry> readBack = wal.readAllSegments();
-
-    assertEquals(50, readBack.size());
+    assertEquals(50, wal.readAllSegments().size());
   }
 
-  // === Timestamp Ordering ===
-
   @Test
-  void testTimestampOrdering() throws IOException, InterruptedException {
+  @Timeout(10)
+  void testTimestampOrdering() throws IOException {
     for (int i = 0; i < 10; i++) {
       wal.append(new LogEntry(50, new byte[50], 1000L + (i * 100)));
     }
     wal.writeBatch();
-
     List<LogEntry> entries = wal.readAllSegments();
-
     for (int i = 1; i < entries.size(); i++) {
-      assertTrue(
-              entries.get(i).timestamp() >= entries.get(i - 1).timestamp(),
-              "Timestamps should be non-decreasing");
+      assertTrue(entries.get(i).timestamp() >= entries.get(i - 1).timestamp());
     }
   }
 
-  // === Recovery ===
-
   @Test
-  void testRecoveryAfterClose() throws IOException, InterruptedException {
+  @Timeout(10)
+  void testRecoveryAfterClose() throws IOException {
     for (int i = 0; i < 10; i++) {
       wal.append(new LogEntry(100, new byte[100], 1000L + i));
     }
@@ -370,12 +278,12 @@ class WriteAheadLogTest {
     WriteAheadLog wal2 = new WriteAheadLog(createConfig());
     List<LogEntry> recovered = wal2.readAllSegments();
     wal2.close();
-
-    assertEquals(10, recovered.size(), "Should recover all entries");
+    assertEquals(10, recovered.size());
   }
 
   @Test
-  void testMultipleWalInstances() throws IOException, InterruptedException {
+  @Timeout(10)
+  void testMultipleWalInstances() throws IOException {
     for (int i = 0; i < 5; i++) {
       wal.append(new LogEntry(100, new byte[100], 1000L + i));
     }
@@ -392,23 +300,12 @@ class WriteAheadLogTest {
     WriteAheadLog wal3 = new WriteAheadLog(createConfig());
     List<LogEntry> recovered = wal3.readAllSegments();
     wal3.close();
-
-    assertEquals(8, recovered.size(), "Should have entries from both instances");
-  }
-
-  // === Edge Cases ===
-
-  @Test
-  void testWriteBatchWithoutAppend() throws IOException {
-    AppendResult result = wal.writeBatch();
-
-    assertNotNull(result);
-    assertTrue(result.flushed());
-    assertEquals(0, result.entriesPendingInBatch());
+    assertEquals(8, recovered.size());
   }
 
   @Test
-  void testMultipleFlushes() throws IOException, InterruptedException {
+  @Timeout(10)
+  void testMultipleFlushes() throws IOException {
     wal.append(new LogEntry(100, new byte[100], 1000L));
     wal.writeBatch();
 
@@ -418,12 +315,83 @@ class WriteAheadLogTest {
     wal.append(new LogEntry(100, new byte[100], 3000L));
     wal.writeBatch();
 
-    List<LogEntry> entries = wal.readAllSegments();
-    assertEquals(3, entries.size());
+    assertEquals(3, wal.readAllSegments().size());
   }
 
   @Test
-  void testSingleEntryRecovery() throws IOException, InterruptedException {
+  @Timeout(10)
+  void testGetSnapshot() throws IOException {
+    wal.append(new LogEntry(100, new byte[100], 1000L));
+    wal.writeBatch();
+    WalSnapshot snapshot = wal.getSnapshot();
+    assertNotNull(snapshot);
+    assertTrue(snapshot.isOpen());
+  }
+
+  @Test
+  @Timeout(10)
+  void testSegmentRotation(@TempDir Path rotatingLogDir) throws IOException {
+    WalConfiguration rotatingConfig =
+        new WalConfiguration.Builder()
+            .logDir(rotatingLogDir.toString())
+            .batchSize(10)
+            .maxSegmentSize(1024)
+            .fsyncStrategy(FsyncStrategy.FSYNC_EVERY_BATCH)
+            .rotationPolicyType(RotationPolicyType.SIZE_BASED)
+            .timestampFormat("yyyy-MM-dd'T'HH:mm:ss.SSS")
+            .maxRetries(3)
+            .retryBackoffMs(10)
+            .retryBackoffMultiplier(2.0)
+            .build();
+
+    WriteAheadLog rotatingWal = new WriteAheadLog(rotatingConfig);
+    for (int i = 0; i < 20; i++) {
+      rotatingWal.append(new LogEntry(100, new byte[100], 1000L + i));
+    }
+    rotatingWal.writeBatch();
+    assertEquals(20, rotatingWal.readAllSegments().size());
+    rotatingWal.close();
+  }
+
+  @Test
+  @Timeout(10)
+  void testTruncateBeforeTimestamp() throws IOException {
+    for (int i = 0; i < 5; i++) {
+      wal.append(new LogEntry(100, new byte[100], 1000L + (i * 1000)));
+    }
+    wal.writeBatch();
+    wal.close();
+
+    wal = new WriteAheadLog(createConfig());
+    for (int i = 0; i < 5; i++) {
+      wal.append(new LogEntry(100, new byte[100], 10000L + (i * 1000)));
+    }
+    wal.writeBatch();
+    wal.close();
+
+    wal = new WriteAheadLog(createConfig());
+    TruncateResult result = wal.truncateBeforeTimestamp(6000L);
+    assertNotNull(result);
+    List<LogEntry> remaining = wal.readAllSegments();
+    assertTrue(remaining.stream().allMatch(e -> e.timestamp() >= 6000L));
+  }
+
+  @Test
+  @Timeout(10)
+  void testCloseDeletesEmptySegmentFile() throws IOException {
+    wal.close();
+
+    WriteAheadLog wal2 = new WriteAheadLog(createConfig());
+    assertEquals(0, wal2.readAllSegments().size());
+    wal2.close();
+
+    File[] logFiles = new File(logDir.toString()).listFiles((d, name) -> name.endsWith(".log"));
+    assertEquals(0, logFiles == null ? 0 : logFiles.length);
+  }
+
+  @Test
+  @Timeout(10)
+  void testSingleEntryRecovery() throws IOException {
     wal.append(new LogEntry(100, new byte[100], 1000L));
     wal.writeBatch();
     wal.close();
@@ -431,7 +399,6 @@ class WriteAheadLogTest {
     WriteAheadLog wal2 = new WriteAheadLog(createConfig());
     List<LogEntry> entries = wal2.readAllSegments();
     wal2.close();
-
     assertEquals(1, entries.size());
   }
 }

@@ -167,4 +167,17 @@ public class SegmentReader {
   public List<LogEntry> readAllAfterTimestamp(long timestamp) throws IOException {
     return readAllMatching(new AfterTimestampFilter(timestamp));
   }
+
+  public List<LogEntry> readCurrentOpenSegment(File segmentFile) throws IOException {
+    if (!segmentFile.exists() || segmentFile.length() <= WalConstants.SEGMENT_HEADER_SIZE) {
+      return List.of();
+    }
+    byte[] allBytes = FileUtils.readAllBytes(segmentFile);
+    byte[] entryRegion = new byte[allBytes.length - WalConstants.SEGMENT_HEADER_SIZE];
+    System.arraycopy(
+        allBytes, WalConstants.SEGMENT_HEADER_SIZE, entryRegion, 0, entryRegion.length);
+    SegmentEntriesReader.SegmentReadResult result =
+        segmentReader.readEntriesFromRegion(entryRegion);
+    return result.entries();
+  }
 }

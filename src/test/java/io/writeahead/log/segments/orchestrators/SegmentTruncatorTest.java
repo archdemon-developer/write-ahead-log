@@ -68,7 +68,6 @@ class SegmentTruncatorTest {
     segmentCollection.add(
         new SegmentMetadata("wal-1000-000001.log", 1, 1000, 200, 10, 5000L, 6000L));
 
-    // Filter with very old timestamp won't match segments with higher timestamps
     TruncateFilter filter = new BeforeTimestampTruncateFilter(100L);
 
     TruncateResult result = truncator.truncateAllMatching(filter);
@@ -83,7 +82,6 @@ class SegmentTruncatorTest {
     segmentCollection.add(
         new SegmentMetadata("wal-1000-000001.log", 1, 1000, 200, 10, 5000L, 6000L));
 
-    // Filter with very old timestamp won't match
     TruncateFilter filter = new BeforeTimestampTruncateFilter(100L);
 
     TruncateResult result = truncator.truncateAllMatching(filter);
@@ -93,7 +91,6 @@ class SegmentTruncatorTest {
 
   @Test
   void testTruncateSingleSegment() throws IOException {
-    // Need at least 2 segments to delete one (system keeps at least 1)
     File seg1 = new File(logDir, "wal-1000-000001.log");
     File seg2 = new File(logDir, "wal-1001-000002.log");
     seg1.createNewFile();
@@ -115,7 +112,6 @@ class SegmentTruncatorTest {
 
   @Test
   void testTruncateSingleSegmentFromCollection() throws IOException {
-    // Need at least 2 segments to delete one (system keeps at least 1)
     File seg1 = new File(logDir, "wal-1000-000001.log");
     File seg2 = new File(logDir, "wal-1001-000002.log");
     seg1.createNewFile();
@@ -129,13 +125,12 @@ class SegmentTruncatorTest {
     BeforeTimestampTruncateFilter filter = new BeforeTimestampTruncateFilter(6000L);
     truncator.truncateAllMatching(filter);
 
-    // System keeps at least one segment
     assertEquals(1, segmentCollection.size());
   }
 
   @Test
   void testTruncateMultipleSegmentsSelective() throws IOException {
-    // Create 3 segments
+
     File seg1 = new File(logDir, "wal-1000-000001.log");
     File seg2 = new File(logDir, "wal-1001-000002.log");
     File seg3 = new File(logDir, "wal-1002-000003.log");
@@ -150,12 +145,11 @@ class SegmentTruncatorTest {
     segmentCollection.add(
         new SegmentMetadata("wal-1002-000003.log", 3, 1002, 200, 10, 3000L, 3500L));
 
-    // Delete segments with maxTimestamp <= 2000L (keeps at least one)
     BeforeTimestampTruncateFilter filter = new BeforeTimestampTruncateFilter(2000L);
     TruncateResult result = truncator.truncateAllMatching(filter);
 
     assertTrue(result.success());
-    assertEquals(1, result.segmentsRemoved()); // Only segment 1
+    assertEquals(1, result.segmentsRemoved());
     assertFalse(seg1.exists());
     assertTrue(seg2.exists() || seg3.exists());
   }
@@ -172,25 +166,22 @@ class SegmentTruncatorTest {
     segmentCollection.add(
         new SegmentMetadata("wal-1001-000002.log", 2, 1001, 200, 10, 2000L, 2500L));
 
-    // Try to delete all with very high timestamp
     BeforeTimestampTruncateFilter filter = new BeforeTimestampTruncateFilter(3000L);
     TruncateResult result = truncator.truncateAllMatching(filter);
 
     assertTrue(result.success());
-    // System should keep at least one segment
+
     assertEquals(1, segmentCollection.size());
   }
 
   @Test
   void testTruncateFileNotFoundHandled() throws IOException {
-    // Add segment to collection but don't create file
     segmentCollection.add(
         new SegmentMetadata("wal-1000-000001.log", 1, 1000, 200, 10, 5000L, 6000L));
 
     BeforeTimestampTruncateFilter filter = new BeforeTimestampTruncateFilter(6000L);
     TruncateResult result = truncator.truncateAllMatching(filter);
 
-    // Should succeed even if file doesn't exist (graceful handling)
     assertTrue(result.success());
   }
 
@@ -246,7 +237,6 @@ class SegmentTruncatorTest {
 
   @Test
   void testTruncateBeforeTimestamp() throws IOException {
-    // Need at least 2 segments to delete one (system keeps at least 1)
     File seg1 = new File(logDir, "wal-1000-000001.log");
     File seg2 = new File(logDir, "wal-1001-000002.log");
     seg1.createNewFile();
@@ -286,7 +276,6 @@ class SegmentTruncatorTest {
     BeforeTimestampTruncateFilter filter = new BeforeTimestampTruncateFilter(1500L);
     TruncateResult result = truncator.truncateAllMatching(filter);
 
-    // Even sequence 0 can be truncated
     assertTrue(result.success());
   }
 
@@ -324,7 +313,6 @@ class SegmentTruncatorTest {
     BeforeTimestampTruncateFilter filter = new BeforeTimestampTruncateFilter(2000L);
     truncator.truncateAllMatching(filter);
 
-    // First file should be deleted, second should remain
     assertFalse(seg1.exists());
   }
 

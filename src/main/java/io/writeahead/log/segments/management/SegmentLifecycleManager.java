@@ -70,8 +70,7 @@ public class SegmentLifecycleManager {
   }
 
   public static String generateSegmentFilename(long sequence) {
-    long now = System.currentTimeMillis();
-    return String.format("wal-%d-%06d.log", now, sequence);
+    return String.format("wal-%06d.log", sequence);
   }
 
   private static void deleteFile(File segmentFile, String filename) {
