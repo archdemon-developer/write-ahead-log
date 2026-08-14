@@ -61,13 +61,20 @@ public class WriteAheadLog {
       long myLsn = allocateLsn(entry.size());
       writeQueue.put(new WriteTask(entry, myLsn));
 
+      long minTs = segmentStore.getCurrentMinTimestamp();
+      long maxTs = segmentStore.getCurrentMaxTimestamp();
+
+      if(minTs == Long.MAX_VALUE || maxTs == Long.MIN_VALUE) {
+        minTs = entry.timestamp();
+        maxTs = entry.timestamp();
+      }
       return AppendResult.successfulAppendNoFlush(
           (int) writeQueue.size(),
           segmentStore.getCurrentSequenceNumber(),
           segmentStore.getCurrentEntryCount(),
           segmentStore.getCurrentStreamSize(),
-          segmentStore.getCurrentMinTimestamp(),
-          segmentStore.getCurrentMaxTimestamp());
+          minTs,
+          maxTs);
 
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
