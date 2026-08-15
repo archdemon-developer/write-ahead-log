@@ -1,7 +1,6 @@
 package io.writeahead.log.integration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.writeahead.log.WriteAheadLog;
 import io.writeahead.log.config.WalConfiguration;
@@ -93,12 +92,12 @@ public class FsyncStrategyIntegrationTest extends IntegrationTestBase {
     int entryCount = 500;
 
     config =
-            new WalConfiguration.Builder()
-                    .logDir(tempDir.toString())
-                    .batchSize(50)
-                    .maxSegmentSize(10 * 1024 * 1024)
-                    .fsyncStrategy(FsyncStrategy.FSYNC_EVERY_BATCH)
-                    .build();
+        new WalConfiguration.Builder()
+            .logDir(tempDir.toString())
+            .batchSize(50)
+            .maxSegmentSize(10 * 1024 * 1024)
+            .fsyncStrategy(FsyncStrategy.FSYNC_EVERY_BATCH)
+            .build();
     wal = new WriteAheadLog(config);
 
     long batchStartNs = System.nanoTime();
@@ -114,12 +113,12 @@ public class FsyncStrategyIntegrationTest extends IntegrationTestBase {
     IntegrationTestFixtures.deleteAllSegments(tempDir.toString());
 
     config =
-            new WalConfiguration.Builder()
-                    .logDir(tempDir.toString())
-                    .batchSize(1)
-                    .maxSegmentSize(10 * 1024 * 1024)
-                    .fsyncStrategy(FsyncStrategy.FSYNC_EVERY_ENTRY)
-                    .build();
+        new WalConfiguration.Builder()
+            .logDir(tempDir.toString())
+            .batchSize(1)
+            .maxSegmentSize(10 * 1024 * 1024)
+            .fsyncStrategy(FsyncStrategy.FSYNC_EVERY_ENTRY)
+            .build();
     wal = new WriteAheadLog(config);
 
     long entryStartNs = System.nanoTime();
@@ -132,13 +131,9 @@ public class FsyncStrategyIntegrationTest extends IntegrationTestBase {
     wal.close();
 
     System.out.println(
-            "Test 3: FSYNC_EVERY_BATCH = "
-                    + String.format("%.0f", batchThroughput)
-                    + " entries/sec");
+        "Test 3: FSYNC_EVERY_BATCH = " + String.format("%.0f", batchThroughput) + " entries/sec");
     System.out.println(
-            "Test 3: FSYNC_EVERY_ENTRY = "
-                    + String.format("%.0f", entryThroughput)
-                    + " entries/sec");
+        "Test 3: FSYNC_EVERY_ENTRY = " + String.format("%.0f", entryThroughput) + " entries/sec");
     System.out.println("Test 3: Strategy comparison (hardware-dependent) ✓");
   }
 

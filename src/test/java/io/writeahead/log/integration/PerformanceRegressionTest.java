@@ -51,12 +51,12 @@ public class PerformanceRegressionTest extends IntegrationTestBase {
   @Timeout(60)
   void testBatchWriteThroughputBaseline() throws IOException {
     config =
-            new WalConfiguration.Builder()
-                    .logDir(tempDir.toString())
-                    .batchSize(50)
-                    .maxSegmentSize(50 * 1024 * 1024)
-                    .fsyncStrategy(FsyncStrategy.FSYNC_EVERY_BATCH)
-                    .build();
+        new WalConfiguration.Builder()
+            .logDir(tempDir.toString())
+            .batchSize(50)
+            .maxSegmentSize(50 * 1024 * 1024)
+            .fsyncStrategy(FsyncStrategy.FSYNC_EVERY_BATCH)
+            .build();
     wal = new WriteAheadLog(config);
 
     int entryCount = 20_000;
@@ -73,9 +73,9 @@ public class PerformanceRegressionTest extends IntegrationTestBase {
 
     double throughput = metrics.getAppendThroughput(entryCount, durationNs);
     System.out.println(
-            "Test 2: Batch write throughput = "
-                    + String.format("%.0f", throughput)
-                    + " entries/sec (informational) ✓");
+        "Test 2: Batch write throughput = "
+            + String.format("%.0f", throughput)
+            + " entries/sec (informational) ✓");
 
     wal.close();
   }
