@@ -84,23 +84,12 @@ jobs:
           java-version: 21
           distribution: 'temurin'
           cache: maven
-      - run: mvn clean test -Dtest='BenchmarkRunner' > benchmark-output.txt 2>&1 || true
-      - run: |
-          if [ -f benchmark-results.json ]; then
-            echo "benchmark-results.json found"
-          elif [ -f benchmark-output.txt ]; then
-            echo "Benchmark output saved"
-          else
-            echo "No benchmark output generated"
-          fi
+      - run: mvn clean test -Dtest='BenchmarkRunner'
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: benchmark-results
-          path: |
-            benchmark-results.json
-            benchmark-output.txt
-          if-no-files-found: ignore
+          name: benchmark-json
+          path: benchmark-results.json
 
   stage-6-collate-artifacts:
     name: Stage 6 - Generate Reports
@@ -116,20 +105,21 @@ jobs:
         continue-on-error: true
       - uses: actions/download-artifact@v4
         with:
-          name: benchmark-results
+          name: benchmark-json
         continue-on-error: true
       - run: |
-          mkdir -p reports
           chmod +x scripts/*.sh
-          [ -f BENCHMARK_RESULTS.md ] || touch BENCHMARK_RESULTS.md
-          [ -f JACOCO_RESULTS.md ] || touch JACOCO_RESULTS.md
-          ./scripts/generate-reports.sh || true
+          mkdir -p reports
+          ./scripts/generate-reports.sh
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: reports
-          path: reports/
-          if-no-files-found: ignore
+          path: |
+            reports/
+            BENCHMARK_RESULTS.md
+            JACOCO_RESULTS.md
+          if-no-files-found: warn
 
   stage-7-publish:
     name: Stage 7 - Publish Artifacts
@@ -141,18 +131,11 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: reports
-          path: reports/
-      - uses: actions/download-artifact@v4
-        with:
-          name: unit-test-results
-          path: test-results/
-      - name: Create Release Artifacts
-        run: |
-          mkdir -p release-artifacts
-          cp reports/* release-artifacts/ 2>/dev/null || true
-          cp BENCHMARK_RESULTS.md release-artifacts/ 2>/dev/null || true
-          cp JACOCO_RESULTS.md release-artifacts/ 2>/dev/null || true
+          path: final-artifacts/
+      - run: |
+          echo "Final artifacts ready for release:"
+          ls -la final-artifacts/
       - uses: actions/upload-artifact@v4
         with:
-          name: release-artifacts
-          path: release-artifacts/
+          name: release
+          path: final-artifacts/

@@ -5,17 +5,20 @@ source scripts/report-utils.sh
 JACOCO_REPORT="target/site/jacoco/index.xml"
 OUTPUT_FILE="JACOCO_RESULTS.md"
 
+if ! file_exists "$JACOCO_REPORT"; then
+  log_warn "JaCoCo report not found"
+  exit 0
+fi
+
 log_info "Generating JaCoCo report..."
 
-require_file "$JACOCO_REPORT"
-
 {
-  md_h1 "Code Coverage Report"
+  cat << 'EOF'
+# Code Coverage Report
 
-  echo "Generated: $(date)"
-  echo ""
+## Coverage Metrics
 
-  md_h2 "Coverage Metrics"
+EOF
 
   overall=$(grep -oP 'COVERED="\K[0-9]+' "$JACOCO_REPORT" | head -1)
   missed=$(grep -oP 'MISSED="\K[0-9]+' "$JACOCO_REPORT" | head -1)
@@ -24,19 +27,23 @@ require_file "$JACOCO_REPORT"
     total=$((overall + missed))
     coverage=$(echo "scale=1; ($overall * 100) / $total" | bc)
 
-    echo "| Metric | Value |"
-    echo "|--------|-------|"
-    echo "| Lines Covered | $overall |"
-    echo "| Lines Missed | $missed |"
-    echo "| Total Lines | $total |"
-    echo "| Coverage | $coverage% |"
-    echo ""
+    cat << EOF
+| Metric | Value |
+|--------|-------|
+| Lines Covered | $overall |
+| Lines Missed | $missed |
+| Total Lines | $total |
+| Coverage | $coverage% |
+
+EOF
   fi
 
-  md_h2 "Coverage by Source File"
+  cat << 'EOF'
+## Coverage by Source File
 
-  echo "| File | Covered | Missed | Total | % |"
-  echo "|------|---------|--------|-------|---|"
+| File | Covered | Missed | Total | % |
+|------|---------|--------|-------|---|
+EOF
 
   grep -E '<sourcefile' "$JACOCO_REPORT" | head -20 | while read line; do
     filename=$(echo "$line" | grep -oP 'name="\K[^"]+')
@@ -50,8 +57,6 @@ require_file "$JACOCO_REPORT"
     fi
   done
 
-  echo ""
-
 } > "$OUTPUT_FILE"
 
-log_success "JaCoCo report generated: $OUTPUT_FILE"
+log_success "JaCoCo report: $OUTPUT_FILE"
