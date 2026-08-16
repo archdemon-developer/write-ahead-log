@@ -8,15 +8,15 @@ log_info "Generating HTML report..."
 
 ensure_dir "reports"
 
-# Read markdown files
+# Read markdown files and escape for sed
 BENCHMARK_CONTENT=""
 if file_exists "BENCHMARK_RESULTS.md"; then
-  BENCHMARK_CONTENT=$(cat BENCHMARK_RESULTS.md | sed 's/</\&lt;/g' | sed 's/>/\&gt;/g')
+  BENCHMARK_CONTENT=$(cat BENCHMARK_RESULTS.md | sed 's/[\/&]/\\&/g')
 fi
 
 JACOCO_CONTENT=""
 if file_exists "JACOCO_RESULTS.md"; then
-  JACOCO_CONTENT=$(cat JACOCO_RESULTS.md | sed 's/</\&lt;/g' | sed 's/>/\&gt;/g')
+  JACOCO_CONTENT=$(cat JACOCO_RESULTS.md | sed 's/[\/&]/\\&/g')
 fi
 
 TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
@@ -93,6 +93,7 @@ cat > "$OUTPUT_FILE" << 'HTMLEOF'
       padding: 15px;
       border-radius: 4px;
       overflow-x: auto;
+      font-size: 0.9em;
     }
     .timestamp {
       color: #999;
@@ -138,9 +139,9 @@ cat > "$OUTPUT_FILE" << 'HTMLEOF'
 </html>
 HTMLEOF
 
-# Now substitute the placeholders
-sed -i "s|TIMESTAMP_PLACEHOLDER|$TIMESTAMP|g" "$OUTPUT_FILE"
-sed -i "s|BENCHMARK_PLACEHOLDER|$BENCHMARK_CONTENT|g" "$OUTPUT_FILE"
-sed -i "s|JACOCO_PLACEHOLDER|$JACOCO_CONTENT|g" "$OUTPUT_FILE"
+# Use / as delimiter (safer) and properly escape content
+sed -i "s/TIMESTAMP_PLACEHOLDER/$TIMESTAMP/g" "$OUTPUT_FILE"
+sed -i "/BENCHMARK_PLACEHOLDER/c\\$BENCHMARK_CONTENT" "$OUTPUT_FILE"
+sed -i "/JACOCO_PLACEHOLDER/c\\$JACOCO_CONTENT" "$OUTPUT_FILE"
 
 log_success "HTML report: $OUTPUT_FILE"
