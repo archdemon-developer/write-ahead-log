@@ -8,50 +8,50 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import org.openjdk.jmh.annotations.Setup;
-import org.openjdk.jmh.annotations.TearDown;
 import org.openjdk.jmh.annotations.Scope;
+import org.openjdk.jmh.annotations.Setup;
 import org.openjdk.jmh.annotations.State;
+import org.openjdk.jmh.annotations.TearDown;
 
 @State(Scope.Benchmark)
 public class WalBenchmarkBase {
 
-    protected WriteAheadLog wal;
-    protected Path tempDir;
+  protected WriteAheadLog wal;
+  protected Path tempDir;
 
-    @Setup
-    public void setup() throws IOException {
-        tempDir = Files.createTempDirectory("wal-benchmark-");
-        WalConfiguration config =
-                new WalConfiguration.Builder()
-                        .logDir(tempDir.toString())
-                        .batchSize(100)
-                        .maxSegmentSize(50 * 1024 * 1024)
-                        .fsyncStrategy(FsyncStrategy.FSYNC_EVERY_BATCH)
-                        .rotationPolicyType(RotationPolicyType.SIZE_BASED)
-                        .build();
-        wal = new WriteAheadLog(config);
-    }
+  @Setup
+  public void setup() throws IOException {
+    tempDir = Files.createTempDirectory("wal-benchmark-");
+    WalConfiguration config =
+        new WalConfiguration.Builder()
+            .logDir(tempDir.toString())
+            .batchSize(100)
+            .maxSegmentSize(50 * 1024 * 1024)
+            .fsyncStrategy(FsyncStrategy.FSYNC_EVERY_BATCH)
+            .rotationPolicyType(RotationPolicyType.SIZE_BASED)
+            .build();
+    wal = new WriteAheadLog(config);
+  }
 
-    @TearDown
-    public void teardown() throws IOException {
-        if (wal != null) {
-            wal.close();
-        }
-        if (tempDir != null) {
-            deleteRecursive(tempDir.toFile());
-        }
+  @TearDown
+  public void teardown() throws IOException {
+    if (wal != null) {
+      wal.close();
     }
+    if (tempDir != null) {
+      deleteRecursive(tempDir.toFile());
+    }
+  }
 
-    private static void deleteRecursive(File file) {
-        if (file.isDirectory()) {
-            File[] files = file.listFiles();
-            if (files != null) {
-                for (File child : files) {
-                    deleteRecursive(child);
-                }
-            }
+  private static void deleteRecursive(File file) {
+    if (file.isDirectory()) {
+      File[] files = file.listFiles();
+      if (files != null) {
+        for (File child : files) {
+          deleteRecursive(child);
         }
-        file.delete();
+      }
     }
+    file.delete();
+  }
 }
