@@ -1,6 +1,5 @@
 name: CI/CD Pipeline
 
-# Trigger on push to main/develop and on pull requests
 on:
   push:
     branches: [ main, develop ]
@@ -8,85 +7,137 @@ on:
     branches: [ main, develop ]
 
 jobs:
-  build-and-test:
-    name: Build, Test, Coverage & Format Check
+  stage-1-spotless:
+    name: Stage 1 - Code Formatting
     runs-on: ubuntu-latest
-
     steps:
-      # 1. Check out the code
-      - name: Checkout code
-        uses: actions/checkout@v7
-
-      # 2. Set up Java 21
-      - name: Set up JDK 21
-        uses: actions/setup-java@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
         with:
           java-version: 21
           distribution: 'temurin'
           cache: maven
+      - run: mvn spotless:check
 
-      # 3. Compile, Test, and Verify Coverage (all in one)
-      - name: Build, Test, and Verify Coverage
-        run: mvn clean verify
-
-      # 4. Check code formatting (Spotless)
-      - name: Check Code Formatting (Spotless)
-        run: mvn spotless:check
-
-      # 5. Upload coverage to artifacts (optional, for visibility)
-      - name: Upload Coverage Report
-        if: always()
-        uses: actions/upload-artifact@v7
+  stage-2-unit-tests:
+    name: Stage 2 - Unit Tests
+    runs-on: ubuntu-latest
+    needs: stage-1-spotless
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
         with:
-          name: jacoco-coverage-report
+          java-version: 21
+          distribution: 'temurin'
+          cache: maven
+      - run: mvn clean test -Dtest='!*IntegrationTest,!*Benchmark*'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: unit-test-results
+          path: target/surefire-reports/
+
+  stage-3-jacoco-verify:
+    name: Stage 3 - Code Coverage Verification
+    runs-on: ubuntu-latest
+    needs: stage-2-unit-tests
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          java-version: 21
+          distribution: 'temurin'
+          cache: maven
+      - run: mvn clean verify -Dtest='!*IntegrationTest,!*Benchmark*'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jacoco-report
           path: target/site/jacoco/
 
-      # 6. Upload coverage to Codecov (auto-updates badge)
-      - name: Upload Coverage to Codecov
-        uses: codecov/codecov-action@v7
-        with:
-          files: ./target/site/jacoco/jacoco.xml
-          flags: unittests
-          name: codecov-umbrella
-          fail_ci_if_error: false
-          token: ${{ secrets.CODECOV_TOKEN }}
-
-      # 7. Comment on PR with coverage info (if PR)
-      - name: Post Coverage Summary to PR
-        if: github.event_name == 'pull_request'
-        run: |
-          echo "✅ **Build Summary**" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
-          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Tests | ✅ Passed |" >> $GITHUB_STEP_SUMMARY
-          echo "| Coverage | ✅ 90%+ |" >> $GITHUB_STEP_SUMMARY
-          echo "| Formatting | ✅ Passed |" >> $GITHUB_STEP_SUMMARY
-
-  # Optional: Lint and static analysis (can expand later)
-  quality-checks:
-    name: Quality Checks
+  stage-4-integration-tests:
+    name: Stage 4 - Integration Tests
     runs-on: ubuntu-latest
-
+    needs: stage-3-jacoco-verify
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up JDK 21
-        uses: actions/setup-java@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
         with:
           java-version: 21
           distribution: 'temurin'
           cache: maven
+      - run: mvn clean test -Dtest='*IntegrationTest'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: integration-test-results
+          path: target/surefire-reports/
 
-      # Full verify (compiles, tests, checks coverage, checks format)
-      - name: Run Full Maven Verify
-        run: mvn clean verify
+  stage-5-benchmarks:
+    name: Stage 5 - Performance Benchmarks
+    runs-on: ubuntu-latest
+    needs: stage-4-integration-tests
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          java-version: 21
+          distribution: 'temurin'
+          cache: maven
+      - run: mvn clean test -Dtest='BenchmarkRunner'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: benchmark-results
+          path: benchmark-results.json
 
-      # Summary
-      - name: Print Success Message
+  stage-6-collate-artifacts:
+    name: Stage 6 - Generate Reports
+    runs-on: ubuntu-latest
+    needs: [stage-3-jacoco-verify, stage-5-benchmarks]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: jacoco-report
+          path: target/site/jacoco/
+      - uses: actions/download-artifact@v4
+        with:
+          name: benchmark-results
+      - run: |
+          mkdir -p reports
+          chmod +x scripts/*.sh
+          ./scripts/generate-reports.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: reports
+          path: |
+            reports/
+            BENCHMARK_RESULTS.md
+            JACOCO_RESULTS.md
+
+  stage-7-publish:
+    name: Stage 7 - Publish Artifacts
+    runs-on: ubuntu-latest
+    needs: stage-6-collate-artifacts
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: reports
+          path: reports/
+      - uses: actions/download-artifact@v4
+        with:
+          name: unit-test-results
+          path: test-results/
+      - name: Create Release Artifacts
         run: |
-          echo "✅ All checks passed!"
-          echo "   - Tests: Passed"
-          echo "   - Coverage: 90%+ verified"
-          echo "   - Formatting: Google Java Format compliant"
+          mkdir -p release-artifacts
+          cp reports/* release-artifacts/ 2>/dev/null || true
+          cp BENCHMARK_RESULTS.md release-artifacts/ 2>/dev/null || true
+          cp JACOCO_RESULTS.md release-artifacts/ 2>/dev/null || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-artifacts
+          path: release-artifacts/
