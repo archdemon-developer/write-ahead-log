@@ -84,7 +84,7 @@ jobs:
           java-version: 21
           distribution: 'temurin'
           cache: maven
-      - run: mvn clean test -Dtest='BenchmarkRunner'
+      - run: mvn clean test -Dtest='BenchmarkRunnerTest'
       - uses: actions/upload-artifact@v4
         if: always()
         with:
