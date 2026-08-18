@@ -5,8 +5,13 @@ source scripts/report-utils.sh
 JACOCO_REPORT="target/site/jacoco/jacoco.xml"
 OUTPUT_FILE="JACOCO_RESULTS.md"
 
+log_info "Checking for JaCoCo report at: $JACOCO_REPORT"
+
 if ! file_exists "$JACOCO_REPORT"; then
   log_warn "JaCoCo report not found at $JACOCO_REPORT"
+  # List what actually exists
+  log_info "Contents of target/site/jacoco/:"
+  ls -la target/site/jacoco/ 2>&1 | head -20
   exit 0
 fi
 
@@ -36,6 +41,8 @@ EOF
 | Coverage | $coverage% |
 
 EOF
+  else
+    log_warn "Could not parse coverage from $JACOCO_REPORT"
   fi
 
   cat << 'EOF'
