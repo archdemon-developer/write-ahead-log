@@ -1,7 +1,5 @@
 #!/bin/bash
 
-set -x  # Debug mode: print all commands
-
 source scripts/report-utils.sh
 
 JACOCO_REPORT="target/site/jacoco/jacoco.xml"
@@ -14,11 +12,10 @@ log_info "Current directory: $(pwd)"
 
 log_info "=== Checking file existence ==="
 if ! file_exists "$JACOCO_REPORT"; then
-  log_error "JACOCO FILE NOT FOUND: $JACOCO_REPORT"
-  log_info "Contents of target/site/jacoco/:"
-  ls -la target/site/jacoco/ || log_error "Directory doesn't exist"
-  exit 0
+  log_error "JaCoCo report not found at $JACOCO_REPORT"
+  exit 1
 fi
+
 log_success "JaCoCo file found"
 
 log_info "=== Reading file size ==="
@@ -26,86 +23,78 @@ wc -l "$JACOCO_REPORT"
 file "$JACOCO_REPORT"
 
 log_info "=== Extracting coverage values ==="
-log_info "Running: grep -oP 'COVERED=\"\\K[0-9]+' \"$JACOCO_REPORT\" | head -1"
-overall=$(grep -oP 'COVERED="\K[0-9]+' "$JACOCO_REPORT" | head -1)
+
+# Extract OVERALL coverage (first counter with type LINE at report level)
+# The root <report> element has a <counter> with type="LINE"
+log_info 'Running: grep -oP "covered=\"\\K[0-9]+" "$JACOCO_REPORT" | head -1'
+overall=$(grep -oP 'covered="\K[0-9]+' "$JACOCO_REPORT" | head -1)
+
 log_info "overall=$overall"
 
-log_info "Running: grep -oP 'MISSED=\"\\K[0-9]+' \"$JACOCO_REPORT\" | head -1"
-missed=$(grep -oP 'MISSED="\K[0-9]+' "$JACOCO_REPORT" | head -1)
+log_info 'Running: grep -oP "missed=\"\\K[0-9]+" "$JACOCO_REPORT" | head -1'
+missed=$(grep -oP 'missed="\K[0-9]+' "$JACOCO_REPORT" | head -1)
+
 log_info "missed=$missed"
 
-if [ -z "$overall" ]; then
-  log_error "Failed to extract COVERED value"
+if [ -z "$overall" ] || [ -z "$missed" ]; then
+  log_error "Failed to extract coverage values"
   log_info "First 100 lines of file:"
   head -100 "$JACOCO_REPORT"
   exit 1
 fi
 
-if [ -z "$missed" ]; then
-  log_error "Failed to extract MISSED value"
-  exit 1
+log_success "Extracted overall=$overall, missed=$missed"
+
+# Calculate percentage
+total=$((overall + missed))
+if [ "$total" -gt 0 ]; then
+  percentage=$((overall * 100 / total))
+else
+  percentage=0
 fi
 
-log_info "Values extracted successfully: overall=$overall, missed=$missed"
+log_info "Calculated coverage: $percentage% ($overall covered, $missed missed)"
 
-log_info "=== Creating markdown file ==="
-log_info "Writing to: $OUTPUT_FILE"
-
+# Create markdown report
 cat > "$OUTPUT_FILE" << EOF
-# Code Coverage Report
+# JaCoCo Code Coverage Report
 
-## Coverage Metrics
+## Overall Coverage
 
 | Metric | Value |
 |--------|-------|
-| Lines Covered | $overall |
-| Lines Missed | $missed |
-| Total Lines | $((overall + missed)) |
+| **Coverage %** | $percentage% |
+| **Lines Covered** | $overall |
+| **Lines Missed** | $missed |
+| **Total Lines** | $total |
 
-## Coverage by Source File
+## Package-Level Coverage
 
-| File | Covered | Missed | Total | % |
-|------|---------|--------|-------|---|
 EOF
 
-log_success "Header written"
+# Extract package-level coverage
+log_info "Extracting package-level coverage..."
+grep -E '<package name=' "$JACOCO_REPORT" | while IFS= read -r line; do
+  # Extract package name
+  pkgname=$(echo "$line" | grep -oP 'name="\K[^"]+')
 
-log_info "=== Extracting source file coverage ==="
-log_info "Running: grep -E '<sourcefile' \"$JACOCO_REPORT\" | head -20"
-sourcefile_count=$(grep -E '<sourcefile' "$JACOCO_REPORT" | head -20 | wc -l)
-log_info "Found $sourcefile_count sourcefile entries"
+  # Get the counter for this package (first counter element following the package)
+  counters=$(echo "$line" | grep -oP '<counter[^>]*>' | head -1)
 
-grep -E '<sourcefile' "$JACOCO_REPORT" | head -20 | while IFS= read -r line; do
-  log_info "Processing line: $line"
+  if [ -n "$counters" ]; then
+    pkg_covered=$(echo "$counters" | grep -oP 'covered="\K[0-9]+')
+    pkg_missed=$(echo "$counters" | grep -oP 'missed="\K[0-9]+')
 
-  filename=$(echo "$line" | grep -oP 'name="\K[^"]+')
-  log_info "  filename=$filename"
-
-  covered=$(echo "$line" | grep -oP 'COVERED="\K[0-9]+')
-  log_info "  covered=$covered"
-
-  missed=$(echo "$line" | grep -oP 'MISSED="\K[0-9]+')
-  log_info "  missed=$missed"
-
-  if [ -n "$covered" ] && [ -n "$missed" ]; then
-    total=$((covered + missed))
-    pct=$((covered * 100 / total))
-    row="| $filename | $covered | $missed | $total | $pct% |"
-    log_info "  Writing row: $row"
-    echo "$row" >> "$OUTPUT_FILE"
-  else
-    log_warn "  Skipping: missing covered or missed"
+    if [ -n "$pkg_covered" ] && [ -n "$pkg_missed" ]; then
+      pkg_total=$((pkg_covered + pkg_missed))
+      if [ "$pkg_total" -gt 0 ]; then
+        pkg_pct=$((pkg_covered * 100 / pkg_total))
+      else
+        pkg_pct=0
+      fi
+      echo "| $pkgname | $pkg_pct% | $pkg_covered | $pkg_missed |" >> "$OUTPUT_FILE"
+    fi
   fi
 done
 
-log_info "=== Verifying output file ==="
-if file_exists "$OUTPUT_FILE"; then
-  log_success "Output file created: $OUTPUT_FILE"
-  log_info "File contents:"
-  cat "$OUTPUT_FILE"
-else
-  log_error "Output file NOT CREATED: $OUTPUT_FILE"
-  exit 1
-fi
-
-log_success "JaCoCo report generation complete"
+log_success "JaCoCo report generated: $OUTPUT_FILE"
