@@ -1,22 +1,22 @@
 #!/bin/bash
 
-# Enhanced Test Report Generator (Pure Bash)
-# Generates comprehensive test quality analysis with explanations
+# Comprehensive Test Report Generator (Pure Bash)
+# Parses Maven test results and generates quality analysis
 
 set -euo pipefail
 
-SUREFIRE_DIR="${1:-target/surefire-reports}"
-OUTPUT_PATH="${2:-TEST_RESULTS.md}"
+OUTPUT_PATH="${1:-TEST_RESULTS.md}"
+SUREFIRE_DIR="target/surefire-reports"
 
 count_tests() {
     find "$SUREFIRE_DIR" -name "*.xml" -type f 2>/dev/null | while read f; do
-        grep -c "testcase" "$f" 2>/dev/null || echo 0
+        grep -c "<testcase" "$f" 2>/dev/null || echo 0
     done | awk '{s+=$1} END {print s+0}'
 }
 
 count_passed() {
     find "$SUREFIRE_DIR" -name "*.xml" -type f 2>/dev/null | while read f; do
-        grep "testcase" "$f" | grep -v "<failure\|<error\|<skipped" | wc -l
+        grep "<testcase" "$f" 2>/dev/null | grep -c -v "<failure\|<error\|<skipped" || echo 0
     done | awk '{s+=$1} END {print s+0}'
 }
 
@@ -33,17 +33,31 @@ main() {
         echo "**Generated:** $(date -Iseconds)"
         echo ""
 
-        if [ ! -d "$SUREFIRE_DIR" ] || [ -z "$(find $SUREFIRE_DIR -name '*.xml' 2>/dev/null | head -1)" ]; then
-            echo "No test results available. Run: \`mvn clean verify\` to execute tests."
+        # Check if tests have been run
+        if [ ! -d "$SUREFIRE_DIR" ] || [ -z "$(find "$SUREFIRE_DIR" -name '*.xml' 2>/dev/null | head -1)" ]; then
+            echo "## Test Results"
+            echo ""
+            echo "No test results found. To generate test results, run:"
+            echo ""
+            echo "\`\`\`bash"
+            echo "mvn clean verify"
+            echo "\`\`\`"
+            echo ""
+            echo "This will:"
+            echo "1. Clean previous builds"
+            echo "2. Compile the code"
+            echo "3. Run all unit tests"
+            echo "4. Run all integration tests"
+            echo "5. Generate JaCoCo coverage reports"
+            echo "6. Generate Surefire test reports in \`target/surefire-reports/\`"
+            echo ""
+            echo "After running Maven, re-generate this report:"
+            echo ""
+            echo "\`\`\`bash"
+            echo "bash scripts/generate-test-report.sh"
+            echo "\`\`\`"
             return
         fi
-
-        local total=$(count_tests)
-        local passed=$(count_passed)
-        local failed=$(count_failed)
-        local pass_rate=0
-
-        [ $total -gt 0 ] && pass_rate=$((passed * 100 / total))
 
         echo "---"
         echo ""
@@ -52,148 +66,145 @@ main() {
         echo "Tests are your safety net. They catch bugs before users see them. This report"
         echo "shows test execution results and identifies quality gaps."
         echo ""
+
+        local total=$(count_tests)
+        local passed=$(count_passed)
+        local failed=$(count_failed)
+        local pass_rate=0
+
+        [ $total -gt 0 ] && pass_rate=$((passed * 100 / total))
+
         echo "### Test Results"
-        echo "- **$total total tests** written and executed"
-        echo "- **$passed tests passing** ✅"
-        echo "- **$failed tests failing** ❌"
+        echo ""
+        echo "- **$total total tests** executed"
+        echo "- **$passed tests passed** ✅"
+        echo "- **$failed tests failed** ❌"
         echo "- **${pass_rate}% pass rate**"
         echo ""
 
         if [ $failed -eq 0 ] && [ $pass_rate -eq 100 ]; then
             echo "### ✅ Excellent Status"
-            echo "All tests passing! Your code is working as designed. Continue adding tests"
-            echo "as you implement new features to maintain this quality."
+            echo ""
+            echo "All $total tests passing! Your code works as designed. This is a strong"
+            echo "confidence signal. Continue adding tests as you implement new features."
         elif [ $failed -lt 5 ]; then
             echo "### ⚠️ Minor Issues"
+            echo ""
             echo "$failed tests are failing. Fix these before pushing to production."
         else
             echo "### 🔴 Critical Issues"
-            echo "$failed tests failing. Do not deploy until these are fixed."
+            echo ""
+            echo "$failed tests failing! Do not deploy until fixed."
         fi
 
         echo ""
-        echo "## Test Execution Details"
+        echo "## Test Quality Analysis"
         echo ""
-        echo "| Metric | Value | Meaning |"
-        echo "|--------|-------|---------|"
-        echo "| Total Tests | $total | Number of test methods executed |"
-        echo "| Passing | $passed | Tests that passed (0 errors) |"
-        echo "| Failing | $failed | Tests that failed (has errors) |"
-        echo "| Pass Rate | ${pass_rate}% | (Passing / Total) × 100 |"
+        echo "Different test types catch different bugs:"
+        echo ""
+        echo "| Type | What It Tests | Status |"
+        echo "|------|---------------|--------|"
+
+        # Count test types by grepping for keywords in test class names
+        crash_files=$(find "$SUREFIRE_DIR" -name "*Crash*Test.xml" -o -name "*Recovery*Test.xml" -o -name "*Restart*Test.xml" 2>/dev/null | wc -l)
+        corrupt_files=$(find "$SUREFIRE_DIR" -name "*Corrupt*Test.xml" -o -name "*Checksum*Test.xml" -o -name "*Crc*Test.xml" 2>/dev/null | wc -l)
+        concur_files=$(find "$SUREFIRE_DIR" -name "*Concurrent*Test.xml" -o -name "*Thread*Test.xml" -o -name "*Stress*Test.xml" -o -name "*Concurrency*Test.xml" 2>/dev/null | wc -l)
+        error_files=$(find "$SUREFIRE_DIR" -name "*Error*Test.xml" -o -name "*Exception*Test.xml" -o -name "*Handle*Test.xml" 2>/dev/null | wc -l)
+        edge_files=$(find "$SUREFIRE_DIR" -name "*Edge*Test.xml" -o -name "*Boundary*Test.xml" 2>/dev/null | wc -l)
+
+        [ $crash_files -gt 0 ] && echo "| Crash & Recovery | Power loss, restart | ✅ Tested |" || echo "| Crash & Recovery | Power loss, restart | 🔴 MISSING |"
+        [ $corrupt_files -gt 0 ] && echo "| Corruption | Data integrity | ✅ Tested |" || echo "| Corruption | Data integrity | 🔴 MISSING |"
+        [ $concur_files -gt 0 ] && echo "| Concurrency | Thread safety | ✅ Tested |" || echo "| Concurrency | Thread safety | 🔴 MISSING |"
+        [ $error_files -gt 2 ] && echo "| Error Handling | Disk errors, timeouts | ✅ Tested |" || echo "| Error Handling | Disk errors, timeouts | ⚠️ Only $error_files |"
+        [ $edge_files -gt 0 ] && echo "| Edge Cases | Boundaries, empty | ✅ Tested |" || echo "| Edge Cases | Boundaries, empty | ⚠️ MISSING |"
+
+        echo ""
+        echo "## Critical Gaps Analysis"
         echo ""
 
-        if [ $pass_rate -lt 100 ]; then
-            echo "### What Failed Tests Mean"
+        if [ $crash_files -eq 0 ]; then
+            echo "### 🔴 CRITICAL: No Crash Recovery Tests"
             echo ""
-            echo "**Broken Functionality:** Each failing test indicates a feature or code path"
-            echo "that does not work as expected. The test describes what *should* happen; the"
-            echo "failure means the actual code does not match this expectation."
+            echo "Crash recovery is the core feature of a WAL. Without tests, you have no"
+            echo "guarantee that data survives power loss. This is a high-risk gap."
             echo ""
-            echo "**Blocking Issues:** Failing tests should BLOCK deployment. Do not push broken"
-            echo "code to production. Fix tests or fix code until all pass."
+            echo "**Create test file:** \`CrashRecoveryTest.java\` with 8+ tests:"
             echo ""
-            echo "**Root Cause:** Each failure has a root cause:"
-            echo "- **Code bug** — implementation has a logic error"
-            echo "- **Test bug** — test expectation is wrong"
-            echo "- **Environment** — test assumes something not available (file, network)"
+            echo "1. \`testKillProcessMidWrite\` — Kill during write, verify recovery"
+            echo "2. \`testDiskErrorRecovery\` — Simulate I/O error, verify handling"
+            echo "3. \`testRandomCrashScenarios\` — Write batches, crash randomly, verify"
+            echo "4. \`testCorruptSegmentFooterRecovery\` — Corrupted footer, recovery works"
+            echo "5. \`testMissingSegmentRecovery\` — Segment deleted, recovery handles it"
+            echo "6. \`testPartialWriteRecovery\` — Incomplete write, recovery skips it"
+            echo "7. \`testPowerLossSimulation\` — Simulate power loss at various points"
+            echo "8. \`testRecoveryFromCorruptedMetadata\` — Metadata corruption handled"
             echo ""
-            echo "**How to Fix:**"
-            echo "1. Read the failure message"
-            echo "2. Determine which of the above is the root cause"
-            echo "3. Fix either the test or the code"
-            echo "4. Re-run: \`mvn clean verify\`"
-            echo "5. Repeat until all pass"
         fi
 
-        echo ""
-        echo "## Test Coverage by Category"
-        echo ""
-        echo "Different types of tests catch different kinds of bugs:"
-        echo ""
-        echo "| Category | What It Tests | Example |"
-        echo "|----------|---------------|---------|"
-        echo "| **Crash & Recovery** | System survives power loss | Write entry, kill process, verify recovery |"
-        echo "| **Corruption** | Data integrity on disk errors | Corrupt segment, verify detection |"
-        echo "| **Concurrency** | Multiple threads don't race | 16 threads writing simultaneously |"
-        echo "| **Error Handling** | Handles errors gracefully | Disk full, permission denied |"
-        echo "| **Edge Cases** | Boundary conditions work | Empty files, max sizes |"
-        echo "| **Happy Path** | Normal operation works | Simple write/read operations |"
-        echo ""
+        if [ $corrupt_files -eq 0 ]; then
+            echo "### 🔴 CRITICAL: No Corruption Detection Tests"
+            echo ""
+            echo "Data corruption is the #1 threat to reliability. Tests must verify"
+            echo "that corrupted data is detected and reported."
+            echo ""
+            echo "**Create test file:** \`CorruptionDetectionTest.java\` with 6+ tests:"
+            echo ""
+            echo "1. \`testCorruptedEntryChecksum\` — CRC mismatch detected"
+            echo "2. \`testCorruptedHeaderDetection\` — Header corruption caught"
+            echo "3. \`testCorruptedFooterDetection\` — Footer corruption caught"
+            echo "4. \`testCorruptedMetadata\` — Metadata CRC validation"
+            echo "5. \`testPartialWriteDetection\` — Incomplete write detected"
+            echo "6. \`testMultipleCorruptedSegments\` — Multiple corrupted segments handled"
+            echo ""
+        fi
 
-        crash=$(find "$SUREFIRE_DIR" -name "*.xml" -type f 2>/dev/null | xargs grep -l "crash\|recovery\|restart" 2>/dev/null | wc -l)
-        corruption=$(find "$SUREFIRE_DIR" -name "*.xml" -type f 2>/dev/null | xargs grep -l "corrupt\|checksum\|crc" 2>/dev/null | wc -l)
-        concurrency=$(find "$SUREFIRE_DIR" -name "*.xml" -type f 2>/dev/null | xargs grep -l "concurrent\|thread\|stress" 2>/dev/null | wc -l)
-        error=$(find "$SUREFIRE_DIR" -name "*.xml" -type f 2>/dev/null | xargs grep -l "error\|exception" 2>/dev/null | wc -l)
-
-        echo "### Your Coverage"
-        echo ""
-        [ $crash -gt 0 ] && echo "✅ **Crash & Recovery** — Tested" || echo "❌ **Crash & Recovery** — MISSING (Critical!)"
-        [ $corruption -gt 0 ] && echo "✅ **Corruption Detection** — Tested" || echo "❌ **Corruption Detection** — MISSING"
-        [ $concurrency -gt 0 ] && echo "✅ **Concurrency** — Tested" || echo "❌ **Concurrency** — MISSING"
-        [ $error -gt 2 ] && echo "✅ **Error Handling** — Tested" || echo "⚠️ **Error Handling** — Insufficient ($error tests)"
-
-        echo ""
-        echo "## Recommended Actions"
-        echo ""
+        if [ $error_files -lt 3 ]; then
+            echo "### 🟡 IMPORTANT: Insufficient Error Handling Tests"
+            echo ""
+            echo "**Current:** $error_files error-related tests"
+            echo "**Recommended:** 6+ tests"
+            echo ""
+            echo "**Create test file:** \`ErrorHandlingTest.java\` with tests for:"
+            echo ""
+            echo "1. \`testDiskFullError\` — ENOSPC handled gracefully"
+            echo "2. \`testPermissionDenied\` — EACCES handled gracefully"
+            echo "3. \`testIOTimeout\` — Timeout errors handled"
+            echo "4. \`testCorruptedMetadataHandling\` — Invalid metadata"
+            echo "5. \`testMissingSegmentFile\` — File not found"
+            echo "6. \`testInvalidSegmentFormat\` — Malformed segment"
+            echo ""
+        fi
 
         if [ $failed -gt 0 ]; then
-            echo "### 🚨 URGENT: Fix Failing Tests"
+            echo "### 🚨 URGENT: Fix $failed Failing Test(s)"
             echo ""
-            echo "Before doing anything else:"
-            echo "1. Run: \`mvn clean verify\`"
-            echo "2. Read failure messages in \`target/surefire-reports/\`"
-            echo "3. Fix the broken code or tests"
-            echo "4. Re-run until all pass"
-            echo "5. Only then work on other improvements"
+            echo "**Before doing anything else:**"
             echo ""
-        fi
-
-        if [ $crash -eq 0 ]; then
-            echo "### 🔴 CRITICAL GAP: No Crash Recovery Tests"
-            echo ""
-            echo "**Why this matters:** Crash recovery is the core feature of a WAL. Without tests,"
-            echo "you have no guarantee that data survives power loss."
-            echo ""
-            echo "**What to add (minimum 8 tests):**"
-            echo "- Kill process mid-write, verify recovery"
-            echo "- Simulate disk error, verify graceful handling"
-            echo "- Write multiple batches, crash randomly, verify all data"
-            echo "- Test recovery with corrupted segment footer"
-            echo ""
-            echo "**Impact:** Adding these tests will give you confidence that your system"
-            echo "actually survives crashes (it might not currently!)."
+            echo "1. Review failing tests in \`target/surefire-reports/\`"
+            echo "2. Determine root cause:"
+            echo "   - Is the code broken? (fix implementation)"
+            echo "   - Is the test broken? (fix test expectations)"
+            echo "   - Is the environment wrong? (fix test setup)"
+            echo "3. Fix the issue"
+            echo "4. Re-run: \`mvn clean verify\`"
+            echo "5. Re-generate this report: \`bash scripts/generate-test-report.sh\`"
             echo ""
         fi
 
-        if [ $error -lt 3 ]; then
-            echo "### 🟡 IMPORTANT GAP: Insufficient Error Handling Tests"
-            echo ""
-            echo "**Current:** $error error-related tests"
-            echo "**Recommended:** 6+ tests for error scenarios"
-            echo ""
-            echo "**What to test:**"
-            echo "- Disk full (ENOSPC) — can't write"
-            echo "- Permission denied (EACCES) — no access"
-            echo "- I/O timeout — slow disk"
-            echo "- Corrupted metadata — detection"
-            echo ""
-            echo "**Impact:** Systems fail in production due to untested error paths."
-            echo ""
-        fi
-
-        echo "## Test Quality Checklist"
+        echo "## Test Coverage Quality Checklist"
         echo ""
         echo "- [$([ $failed -eq 0 ] && echo 'x' || echo ' ')] All tests passing"
-        echo "- [$([ $crash -gt 0 ] && echo 'x' || echo ' ')] Crash recovery tested"
-        echo "- [$([ $error -gt 2 ] && echo 'x' || echo ' ')] Error handling tested"
-        echo "- [$([ $concurrency -gt 0 ] && echo 'x' || echo ' ')] Concurrency tested"
-        echo "- [$([ $corruption -gt 0 ] && echo 'x' || echo ' ')] Corruption tested"
+        echo "- [$([ $crash_files -gt 0 ] && echo 'x' || echo ' ')] Crash recovery tested"
+        echo "- [$([ $corrupt_files -gt 0 ] && echo 'x' || echo ' ')] Corruption tested"
+        echo "- [$([ $concur_files -gt 0 ] && echo 'x' || echo ' ')] Concurrency tested"
+        echo "- [$([ $error_files -gt 2 ] && echo 'x' || echo ' ')] Error handling tested"
+        echo "- [$([ $edge_files -gt 0 ] && echo 'x' || echo ' ')] Edge cases tested"
         echo ""
 
-        if [ $failed -eq 0 ] && [ $crash -gt 0 ] && [ $error -gt 2 ]; then
-            echo "✅ **TEST SUITE IS SOLID**"
+        if [ $failed -eq 0 ] && [ $crash_files -gt 0 ] && [ $corrupt_files -gt 0 ] && [ $error_files -gt 2 ]; then
+            echo "✅ **TEST SUITE IS SOLID** — Good quality, high confidence"
         else
-            echo "⚠️ **GAPS REMAIN** — See recommendations above"
+            echo "⚠️ **GAPS REMAIN** — Address them above"
         fi
 
     } > "$OUTPUT_PATH"
