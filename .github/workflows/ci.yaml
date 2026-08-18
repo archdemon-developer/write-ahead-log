@@ -98,49 +98,141 @@ jobs:
     if: always()
     steps:
       - uses: actions/checkout@v4
-      - run: sudo apt-get update && sudo apt-get install -y jq bc
+
+      # Download all artifacts
       - uses: actions/download-artifact@v4
         with:
           name: jacoco-report
           path: target/site/jacoco/
         continue-on-error: true
+
       - uses: actions/download-artifact@v4
         with:
           name: benchmark-json
+          path: .
         continue-on-error: true
+
+      # Verify artifacts are ready
       - run: |
-          echo "=== Files present ==="
-          find . -name "jacoco.xml" -o -name "benchmark-results.json"
-          ls -la target/site/jacoco/ 2>/dev/null || echo "target/site/jacoco/ missing"
+          echo "=== Artifact Verification ==="
+          if [ -f "target/site/jacoco/jacoco.xml" ]; then
+            echo "✅ JaCoCo report ready"
+          else
+            echo "⚠️  JaCoCo report not found"
+          fi
+          if [ -f "benchmark-results.json" ]; then
+            echo "✅ Benchmark results ready"
+          else
+            echo "⚠️  Benchmark results not found"
+          fi
+
+      # Generate dynamic reports (pure Bash, no dependencies)
       - run: |
           chmod +x scripts/*.sh
           mkdir -p reports
-          ./scripts/generate-reports.sh
+          bash scripts/generate-reports.sh
+          echo "✅ All reports generated successfully"
+
+      # Upload all generated reports
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: reports
           path: |
             reports/
-            BENCHMARK_RESULTS.md
             JACOCO_RESULTS.md
+            BENCHMARK_RESULTS.md
+            TEST_RESULTS.md
           if-no-files-found: warn
+
+  stage-6-dynamic-analysis:
+    name: Stage 6b - Dynamic Gap Analysis (Optional)
+    runs-on: ubuntu-latest
+    needs: [ stage-3-jacoco-verify, stage-5-benchmarks ]
+    if: always()
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      # Download artifacts for dynamic analysis
+      - uses: actions/download-artifact@v4
+        with:
+          name: jacoco-report
+          path: target/site/jacoco/
+        continue-on-error: true
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: benchmark-json
+          path: .
+        continue-on-error: true
+
+      # Generate dynamic (gap-focused) reports
+      - run: |
+          chmod +x scripts/*.sh
+          bash scripts/generate-dynamic-reports.sh
+          echo "✅ Dynamic gap analysis complete"
+
+      # Upload dynamic reports for developers
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dynamic-reports
+          path: |
+            JACOCO_DYNAMIC.md
+            TEST_DYNAMIC.md
+            BENCHMARK_DYNAMIC.md
+          if-no-files-found: ignore
 
   stage-7-publish:
     name: Stage 7 - Publish Artifacts
     runs-on: ubuntu-latest
-    needs: stage-6-collate-artifacts
+    needs: [ stage-6-collate-artifacts, stage-6-dynamic-analysis ]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v4
+
+      # Download formal reports
       - uses: actions/download-artifact@v4
         with:
           name: reports
           path: final-artifacts/
+        continue-on-error: true
+
+      # Download dynamic reports (if generated)
+      - uses: actions/download-artifact@v4
+        with:
+          name: dynamic-reports
+          path: final-artifacts/
+        continue-on-error: true
+
+      # Create release summary
       - run: |
-          echo "Final artifacts ready for release:"
+          echo "=== Release Artifacts Ready ===" > final-artifacts/README.md
+          echo "" >> final-artifacts/README.md
+          echo "**Generated:** $(date -Iseconds)" >> final-artifacts/README.md
+          echo "" >> final-artifacts/README.md
+          echo "## Contents" >> final-artifacts/README.md
+          echo "" >> final-artifacts/README.md
+          echo "### Formal Reports" >> final-artifacts/README.md
+          echo "- \`JACOCO_RESULTS.md\` — Code coverage analysis" >> final-artifacts/README.md
+          echo "- \`BENCHMARK_RESULTS.md\` — Performance metrics" >> final-artifacts/README.md
+          echo "- \`TEST_RESULTS.md\` — Test quality summary" >> final-artifacts/README.md
+          echo "- \`reports/index.html\` — Interactive HTML dashboard" >> final-artifacts/README.md
+          echo "" >> final-artifacts/README.md
+          echo "### Dynamic Analysis (Gap-Focused)" >> final-artifacts/README.md
+          echo "- \`JACOCO_DYNAMIC.md\` — Coverage gaps ranked by risk" >> final-artifacts/README.md
+          echo "- \`TEST_DYNAMIC.md\` — Test quality gaps" >> final-artifacts/README.md
+          echo "- \`BENCHMARK_DYNAMIC.md\` — Performance bottlenecks" >> final-artifacts/README.md
+          echo "" >> final-artifacts/README.md
+          echo "## View Reports" >> final-artifacts/README.md
+          echo "Open \`reports/index.html\` in a browser for interactive dashboard." >> final-artifacts/README.md
+          
+          echo "✅ Final artifacts ready for release:"
           ls -la final-artifacts/
+
+      # Publish release artifacts
       - uses: actions/upload-artifact@v4
         with:
-          name: release
+          name: release-artifacts
           path: final-artifacts/
