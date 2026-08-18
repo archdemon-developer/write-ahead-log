@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Comprehensive Test Report Generator (Pure Bash)
-# Parses Maven test results and generates quality analysis
+# Parses Maven test results with proper error handling
 
 set -euo pipefail
 
@@ -35,36 +35,35 @@ main() {
 
         # Check if tests have been run
         if [ ! -d "$SUREFIRE_DIR" ] || [ -z "$(find "$SUREFIRE_DIR" -name '*.xml' 2>/dev/null | head -1)" ]; then
-            echo "## Test Results"
+            echo "## No Test Results Available"
             echo ""
-            echo "No test results found. To generate test results, run:"
+            echo "Maven tests have not been run yet. To execute tests:"
             echo ""
             echo "\`\`\`bash"
             echo "mvn clean verify"
             echo "\`\`\`"
             echo ""
-            echo "This will:"
+            echo "This command will:"
+            echo ""
             echo "1. Clean previous builds"
-            echo "2. Compile the code"
-            echo "3. Run all unit tests"
+            echo "2. Compile all source code"
+            echo "3. Run all unit tests in \`src/test/java/\`"
             echo "4. Run all integration tests"
             echo "5. Generate JaCoCo coverage reports"
             echo "6. Generate Surefire test reports in \`target/surefire-reports/\`"
             echo ""
-            echo "After running Maven, re-generate this report:"
+            echo "After running Maven, regenerate this report:"
             echo ""
             echo "\`\`\`bash"
             echo "bash scripts/generate-test-report.sh"
             echo "\`\`\`"
+            echo ""
             return
         fi
 
         echo "---"
         echo ""
-        echo "## Executive Summary"
-        echo ""
-        echo "Tests are your safety net. They catch bugs before users see them. This report"
-        echo "shows test execution results and identifies quality gaps."
+        echo "## Test Execution Results"
         echo ""
 
         local total=$(count_tests)
@@ -74,8 +73,6 @@ main() {
 
         [ $total -gt 0 ] && pass_rate=$((passed * 100 / total))
 
-        echo "### Test Results"
-        echo ""
         echo "- **$total total tests** executed"
         echo "- **$passed tests passed** ✅"
         echo "- **$failed tests failed** ❌"
@@ -86,7 +83,7 @@ main() {
             echo "### ✅ Excellent Status"
             echo ""
             echo "All $total tests passing! Your code works as designed. This is a strong"
-            echo "confidence signal. Continue adding tests as you implement new features."
+            echo "confidence signal for production deployment."
         elif [ $failed -lt 5 ]; then
             echo "### ⚠️ Minor Issues"
             echo ""
@@ -128,16 +125,7 @@ main() {
             echo "Crash recovery is the core feature of a WAL. Without tests, you have no"
             echo "guarantee that data survives power loss. This is a high-risk gap."
             echo ""
-            echo "**Create test file:** \`CrashRecoveryTest.java\` with 8+ tests:"
-            echo ""
-            echo "1. \`testKillProcessMidWrite\` — Kill during write, verify recovery"
-            echo "2. \`testDiskErrorRecovery\` — Simulate I/O error, verify handling"
-            echo "3. \`testRandomCrashScenarios\` — Write batches, crash randomly, verify"
-            echo "4. \`testCorruptSegmentFooterRecovery\` — Corrupted footer, recovery works"
-            echo "5. \`testMissingSegmentRecovery\` — Segment deleted, recovery handles it"
-            echo "6. \`testPartialWriteRecovery\` — Incomplete write, recovery skips it"
-            echo "7. \`testPowerLossSimulation\` — Simulate power loss at various points"
-            echo "8. \`testRecoveryFromCorruptedMetadata\` — Metadata corruption handled"
+            echo "**Create test file:** \`CrashRecoveryTest.java\` with 8+ tests"
             echo ""
         fi
 
@@ -147,14 +135,7 @@ main() {
             echo "Data corruption is the #1 threat to reliability. Tests must verify"
             echo "that corrupted data is detected and reported."
             echo ""
-            echo "**Create test file:** \`CorruptionDetectionTest.java\` with 6+ tests:"
-            echo ""
-            echo "1. \`testCorruptedEntryChecksum\` — CRC mismatch detected"
-            echo "2. \`testCorruptedHeaderDetection\` — Header corruption caught"
-            echo "3. \`testCorruptedFooterDetection\` — Footer corruption caught"
-            echo "4. \`testCorruptedMetadata\` — Metadata CRC validation"
-            echo "5. \`testPartialWriteDetection\` — Incomplete write detected"
-            echo "6. \`testMultipleCorruptedSegments\` — Multiple corrupted segments handled"
+            echo "**Create test file:** \`CorruptionDetectionTest.java\` with 6+ tests"
             echo ""
         fi
 
@@ -162,32 +143,14 @@ main() {
             echo "### 🟡 IMPORTANT: Insufficient Error Handling Tests"
             echo ""
             echo "**Current:** $error_files error-related tests"
-            echo "**Recommended:** 6+ tests"
-            echo ""
-            echo "**Create test file:** \`ErrorHandlingTest.java\` with tests for:"
-            echo ""
-            echo "1. \`testDiskFullError\` — ENOSPC handled gracefully"
-            echo "2. \`testPermissionDenied\` — EACCES handled gracefully"
-            echo "3. \`testIOTimeout\` — Timeout errors handled"
-            echo "4. \`testCorruptedMetadataHandling\` — Invalid metadata"
-            echo "5. \`testMissingSegmentFile\` — File not found"
-            echo "6. \`testInvalidSegmentFormat\` — Malformed segment"
+            echo "**Recommended:** 6+ tests covering disk full, permission denied, timeouts, etc."
             echo ""
         fi
 
         if [ $failed -gt 0 ]; then
             echo "### 🚨 URGENT: Fix $failed Failing Test(s)"
             echo ""
-            echo "**Before doing anything else:**"
-            echo ""
-            echo "1. Review failing tests in \`target/surefire-reports/\`"
-            echo "2. Determine root cause:"
-            echo "   - Is the code broken? (fix implementation)"
-            echo "   - Is the test broken? (fix test expectations)"
-            echo "   - Is the environment wrong? (fix test setup)"
-            echo "3. Fix the issue"
-            echo "4. Re-run: \`mvn clean verify\`"
-            echo "5. Re-generate this report: \`bash scripts/generate-test-report.sh\`"
+            echo "Before doing anything else: review failing tests and fix the root cause."
             echo ""
         fi
 
@@ -199,13 +162,6 @@ main() {
         echo "- [$([ $concur_files -gt 0 ] && echo 'x' || echo ' ')] Concurrency tested"
         echo "- [$([ $error_files -gt 2 ] && echo 'x' || echo ' ')] Error handling tested"
         echo "- [$([ $edge_files -gt 0 ] && echo 'x' || echo ' ')] Edge cases tested"
-        echo ""
-
-        if [ $failed -eq 0 ] && [ $crash_files -gt 0 ] && [ $corrupt_files -gt 0 ] && [ $error_files -gt 2 ]; then
-            echo "✅ **TEST SUITE IS SOLID** — Good quality, high confidence"
-        else
-            echo "⚠️ **GAPS REMAIN** — Address them above"
-        fi
 
     } > "$OUTPUT_PATH"
 

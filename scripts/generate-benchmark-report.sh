@@ -1,17 +1,12 @@
 #!/bin/bash
 
 # Comprehensive Benchmark Report Generator (Pure Bash)
-# Extracts and explains ALL metrics: ops/sec, latency, throughput, etc.
+# Handles missing data gracefully with clear messaging
 
 set -euo pipefail
 
 JSON_PATH="${1:-benchmark-results.json}"
 OUTPUT_PATH="${2:-BENCHMARK_RESULTS.md}"
-
-extract_metrics() {
-    local name="$1"
-    grep -A 20 "\"$name\"" "$JSON_PATH" 2>/dev/null || true
-}
 
 main() {
     {
@@ -20,8 +15,19 @@ main() {
         echo "**Generated:** $(date -Iseconds)"
         echo ""
 
+        # Check if JSON file exists and has content
         if [ ! -f "$JSON_PATH" ] || [ ! -s "$JSON_PATH" ]; then
-            echo "No benchmark data available. Run: \`mvn clean verify\` to execute tests."
+            echo "## No Benchmark Data Available"
+            echo ""
+            echo "Benchmark results not found. To generate benchmarks:"
+            echo ""
+            echo "\`\`\`bash"
+            echo "mvn clean verify"
+            echo "\`\`\`"
+            echo ""
+            echo "This will run all tests including JMH benchmarks. Results will be saved"
+            echo "to \`benchmark-results.json\` in the project root."
+            echo ""
             return
         fi
 
@@ -33,175 +39,143 @@ main() {
         echo "including throughput, latency, and operational characteristics under various workloads."
         echo ""
 
-        # Extract all benchmark names and their scores
+        # Try to extract metrics from JSON (with error checking)
         echo "## Benchmark Results"
         echo ""
 
         # Producer Throughput
-        if grep -q "ProducerThroughput" "$JSON_PATH" 2>/dev/null; then
-            prod_score=$(grep -oP 'ProducerThroughput.*?"score":\s*\K[0-9.]+' "$JSON_PATH" | head -1 || echo "N/A")
+        prod_score=$(grep -oP '"ProducerThroughput".*?"score":\s*\K[0-9.]+' "$JSON_PATH" 2>/dev/null | head -1 || echo "")
+
+        if [ -n "$prod_score" ]; then
             echo "### 1. Producer Throughput (ops/sec)"
             echo ""
-            echo "**Raw Metric:** \`$prod_score\` operations per second"
+            echo "**Raw Metric:** \`${prod_score}\` operations per second"
             echo ""
             echo "**What It Measures:**"
             echo "How many log entries per second can producers submit to the queue without blocking."
             echo "This is the application-level throughput limit. Higher = faster submission rate."
             echo ""
 
-            if [[ "$prod_score" != "N/A" ]]; then
-                score_int=${prod_score%.*}
-                if [ "$score_int" -ge 50000 ]; then
-                    echo "**Status:** 🟢 EXCELLENT (target: 50k ops/sec)"
-                    echo "**Interpretation:** Queueing throughput is excellent."
-                    echo "**Implication:** Your system can handle high-frequency entry production"
-                    echo "without queue saturation. Suitable for demanding workloads."
-                elif [ "$score_int" -ge 30000 ]; then
-                    echo "**Status:** 🟡 ACCEPTABLE (30k-50k ops/sec)"
-                    echo "**Interpretation:** Throughput is reasonable but below ideal."
-                    echo "**Implication:** Under peak load, producers may experience brief blocking."
-                    echo "**Recommendation:** Monitor queue depth. Consider increasing batch size"
-                    echo "or upgrading storage if this becomes a bottleneck."
-                else
-                    echo "**Status:** 🔴 BELOW TARGET (<30k ops/sec)"
-                    echo "**Interpretation:** Queue submission is slow."
-                    echo "**Implication:** Lock contention on the write queue. Producers regularly block."
-                    echo "**Recommendation:** Increase batch size to reduce contention frequency,"
-                    echo "or reduce concurrent producers."
-                fi
+            score_int=${prod_score%.*}
+            if [ "$score_int" -ge 50000 ]; then
+                echo "**Status:** 🟢 EXCELLENT (target: 50k ops/sec)"
+            elif [ "$score_int" -ge 30000 ]; then
+                echo "**Status:** 🟡 ACCEPTABLE (30k-50k ops/sec)"
+            else
+                echo "**Status:** 🔴 BELOW TARGET (<30k ops/sec)"
             fi
+            echo ""
+        else
+            echo "### 1. Producer Throughput (ops/sec)"
+            echo ""
+            echo "**Status:** ⚠️ Metric not captured"
+            echo ""
+            echo "Producer throughput could not be extracted from benchmark results."
+            echo "Ensure ProducerThroughputBenchmark ran successfully."
             echo ""
         fi
 
         # Writer Drain Rate
-        if grep -q "WriterDrain" "$JSON_PATH" 2>/dev/null; then
-            drain_score=$(grep -oP 'WriterDrain.*?"score":\s*\K[0-9.]+' "$JSON_PATH" | head -1 || echo "N/A")
+        drain_score=$(grep -oP '"WriterDrain".*?"score":\s*\K[0-9.]+' "$JSON_PATH" 2>/dev/null | head -1 || echo "")
+
+        if [ -n "$drain_score" ]; then
             echo "### 2. Writer Drain Rate (batches/sec → entries/sec)"
             echo ""
-            echo "**Raw Metric:** \`$drain_score\` batches per second"
+            echo "**Raw Metric:** \`${drain_score}\` batches per second"
             echo ""
-            if [[ "$drain_score" != "N/A" ]]; then
-                drain_int=${drain_score%.*}
-                entries=$((drain_int * 100))
-                echo "**Derived Metric:** \`~$entries\` entries per second (at 100 entries/batch)"
-                echo ""
-            fi
-
+            drain_int=${drain_score%.*}
+            entries=$((drain_int * 100))
+            echo "**Derived Metric:** \`~${entries}\` entries per second (at 100 entries/batch)"
+            echo ""
             echo "**What It Measures:**"
             echo "How fast the background writer thread can flush batches to disk."
             echo "This is your actual disk I/O throughput. Higher = faster disk writes."
             echo ""
 
-            if [[ "$drain_score" != "N/A" ]]; then
-                drain_int=${drain_score%.*}
-                if [ "$drain_int" -ge 80 ]; then
-                    echo "**Status:** 🟢 EXCELLENT (target: 80+ batches/sec)"
-                    echo "**Interpretation:** Disk throughput is excellent."
-                    echo "**Implication:** Storage (likely SSD) is not a bottleneck. Writer thread"
-                    echo "can handle write load easily. Excellent for high-throughput scenarios."
-                elif [ "$drain_int" -ge 50 ]; then
-                    echo "**Status:** 🟡 ACCEPTABLE (50-80 batches/sec)"
-                    echo "**Interpretation:** Disk throughput is reasonable."
-                    echo "**Implication:** Storage keeps up with typical workloads. If using HDD,"
-                    echo "this is expected behavior. Under heavy concurrent load, may become"
-                    echo "a bottleneck."
-                    echo "**Recommendation:** Monitor disk utilization. Consider SSD upgrade if"
-                    echo "performance degrades under load."
-                else
-                    echo "**Status:** 🔴 SLOW (<50 batches/sec)"
-                    echo "**Interpretation:** Disk write rate is significantly slow."
-                    echo "**Implication:** Storage is a major bottleneck. Writer thread regularly"
-                    echo "blocked waiting for I/O. Producer throughput will be limited."
-                    echo "**Recommendation:** Upgrade storage:"
-                    echo "  - Replace HDD with SSD (5-10x improvement)"
-                    echo "  - Use NVMe SSD instead of SATA (2-3x improvement)"
-                    echo "  - Verify disk is not overloaded by other processes"
-                fi
+            if [ "$drain_int" -ge 80 ]; then
+                echo "**Status:** 🟢 EXCELLENT (target: 80+ batches/sec)"
+            elif [ "$drain_int" -ge 50 ]; then
+                echo "**Status:** 🟡 ACCEPTABLE (50-80 batches/sec)"
+            else
+                echo "**Status:** 🔴 SLOW (<50 batches/sec)"
             fi
+            echo ""
+        else
+            echo "### 2. Writer Drain Rate (batches/sec → entries/sec)"
+            echo ""
+            echo "**Status:** ⚠️ Metric not captured"
+            echo ""
+            echo "Writer drain rate could not be extracted. Ensure WriterDrainBenchmark ran successfully."
             echo ""
         fi
 
         # Latency metrics
-        if grep -q "Latency" "$JSON_PATH" 2>/dev/null; then
-            latency_score=$(grep -oP 'Latency.*?"score":\s*\K[0-9.]+' "$JSON_PATH" | head -1 || echo "N/A")
+        latency_score=$(grep -oP '"DurabilityBarrier".*?"score":\s*\K[0-9.]+' "$JSON_PATH" 2>/dev/null | head -1 || echo "")
+
+        if [ -n "$latency_score" ]; then
             echo "### 3. Durability Barrier Latency (microseconds)"
             echo ""
-            echo "**Raw Metric:** \`$latency_score\` microseconds"
+            echo "**Raw Metric:** \`${latency_score}\` microseconds"
             echo ""
-            if [[ "$latency_score" != "N/A" ]]; then
-                latency_int=${latency_score%.*}
+            latency_int=${latency_score%.*}
+            if [ "$latency_int" -gt 0 ]; then
                 latency_ms=$((latency_int / 1000))
                 if [ $latency_ms -eq 0 ]; then
                     latency_ms=1
                 fi
                 echo "**Converted:** \`~${latency_ms}ms\` (milliseconds)"
-                echo ""
             fi
-
+            echo ""
             echo "**What It Measures:**"
             echo "Time for writeBatch() to complete after all entries are durable on disk."
             echo "This is the user-perceived latency for durability guarantees."
             echo ""
 
-            if [[ "$latency_score" != "N/A" ]]; then
-                latency_int=${latency_score%.*}
-                if [ "$latency_int" -le 5000 ]; then
-                    echo "**Status:** 🟢 EXCELLENT (<5ms)"
-                    echo "**Interpretation:** Latency is very low."
-                    echo "**Implication:** Minimal blocking. Excellent for interactive scenarios"
-                    echo "where users need fast durability guarantees."
-                elif [ "$latency_int" -le 100000 ]; then
-                    echo "**Status:** 🟡 ACCEPTABLE (5-100ms)"
-                    echo "**Interpretation:** Latency is moderate."
-                    echo "**Implication:** Some blocking occurs. Acceptable for batch workloads."
-                    echo "**Recommendation:** Monitor latency percentiles (p50, p99). Consider"
-                    echo "FSYNC_EVERY_ENTRY strategy if variance is high."
-                else
-                    echo "**Status:** 🔴 HIGH (>100ms)"
-                    echo "**Interpretation:** Latency is high."
-                    echo "**Implication:** writeBatch() blocks for significant time. Users"
-                    echo "experience noticeable delays."
-                    echo "**Recommendation:** Review fsync strategy. Consider FSYNC_EVERY_ENTRY"
-                    echo "for lower, more predictable latency."
-                fi
+            if [ "$latency_int" -le 5000 ]; then
+                echo "**Status:** 🟢 EXCELLENT (<5ms)"
+            elif [ "$latency_int" -le 100000 ]; then
+                echo "**Status:** 🟡 ACCEPTABLE (5-100ms)"
+            else
+                echo "**Status:** 🔴 HIGH (>100ms)"
             fi
+            echo ""
+        else
+            echo "### 3. Durability Barrier Latency (microseconds)"
+            echo ""
+            echo "**Status:** ⚠️ Metric not captured"
+            echo ""
+            echo "Latency metrics could not be extracted. Ensure DurabilityBarrierBenchmark ran successfully."
             echo ""
         fi
 
         # Queue Saturation
-        if grep -q "Saturation" "$JSON_PATH" 2>/dev/null; then
-            sat_score=$(grep -oP 'Saturation.*?"score":\s*\K[0-9.]+' "$JSON_PATH" | head -1 || echo "N/A")
+        sat_score=$(grep -oP '"QueueSaturation".*?"score":\s*\K[0-9.]+' "$JSON_PATH" 2>/dev/null | head -1 || echo "")
+
+        if [ -n "$sat_score" ]; then
             echo "### 4. Queue Saturation Latency (microseconds under concurrent load)"
             echo ""
-            echo "**Raw Metric:** \`$sat_score\` microseconds average latency"
+            echo "**Raw Metric:** \`${sat_score}\` microseconds average latency"
             echo ""
             echo "**What It Measures:**"
             echo "Latency when multiple producer threads simultaneously queue entries."
             echo "Shows how well queue lock scales under concurrent production."
             echo ""
 
-            if [[ "$sat_score" != "N/A" ]]; then
-                sat_int=${sat_score%.*}
-                if [ "$sat_int" -lt 100 ]; then
-                    echo "**Status:** 🟢 LOW CONTENTION (<100µs)"
-                    echo "**Interpretation:** Queue lock doesn't contend much."
-                    echo "**Implication:** System handles concurrent producers well (8+ threads)."
-                    echo "Lock is not a bottleneck."
-                elif [ "$sat_int" -lt 300 ]; then
-                    echo "**Status:** 🟡 MODERATE CONTENTION (100-300µs)"
-                    echo "**Interpretation:** Some lock contention visible under load."
-                    echo "**Implication:** Concurrent producers experience mild delays."
-                    echo "Safe for ≤8 concurrent threads."
-                    echo "**Recommendation:** Monitor under production load. Recommend ≤8"
-                    echo "concurrent producers or increase batch size."
-                else
-                    echo "**Status:** 🔴 HIGH CONTENTION (>300µs)"
-                    echo "**Interpretation:** Queue lock heavily contested."
-                    echo "**Implication:** Multiple producers cause significant blocking."
-                    echo "**Recommendation:** Limit concurrent producers to <4 or increase"
-                    echo "batch size significantly to reduce contention frequency."
-                fi
+            sat_int=${sat_score%.*}
+            if [ "$sat_int" -lt 100 ]; then
+                echo "**Status:** 🟢 LOW CONTENTION (<100µs)"
+            elif [ "$sat_int" -lt 300 ]; then
+                echo "**Status:** 🟡 MODERATE CONTENTION (100-300µs)"
+            else
+                echo "**Status:** 🔴 HIGH CONTENTION (>300µs)"
             fi
+            echo ""
+        else
+            echo "### 4. Queue Saturation Latency (microseconds under concurrent load)"
+            echo ""
+            echo "**Status:** ⚠️ Metric not captured"
+            echo ""
+            echo "Queue saturation metrics could not be extracted. Ensure QueueSaturationBenchmark ran successfully."
             echo ""
         fi
 
@@ -256,33 +230,15 @@ main() {
         echo "- Gives predictable ~3µs latency"
         echo "- Better for interactive workloads"
         echo ""
-        echo "**Or Tune FSYNC_EVERY_BATCH:**"
-        echo "- Increase batch timeout (batch more entries)"
-        echo "- But this increases user-perceived latency"
-        echo ""
         echo "### If Queue Saturation Is High"
         echo ""
         echo "**Reduce Concurrent Producers:**"
         echo "- Fewer producers = less contention = lower latency"
         echo "- Cap at 4-8 concurrent producers"
-        echo ""
-        echo "**Increase Batch Size:**"
-        echo "- Reduces contention frequency"
-        echo "- Each producer submits more entries per operation"
-        echo ""
-
-        echo "## Summary Table"
-        echo ""
-        echo "| Metric | Status | Action |"
-        echo "|--------|--------|--------|"
-        echo "| Producer Throughput | See above | Optimize queue or disk |"
-        echo "| Writer Drain Rate | See above | Upgrade storage if <50 |"
-        echo "| Durability Latency | See above | Consider FSYNC_EVERY_ENTRY if >5ms |"
-        echo "| Queue Saturation | See above | Limit producers if >300µs |"
 
     } > "$OUTPUT_PATH"
 
-    echo "[SUCCESS] Comprehensive benchmark report: $OUTPUT_PATH"
+    echo "[SUCCESS] Benchmark report: $OUTPUT_PATH"
 }
 
 main
