@@ -1,6 +1,7 @@
 #!/bin/bash
 
-# Generates JACOCO_RESULTS.md with data-driven analysis
+# Enhanced JaCoCo Report Generator (Pure Bash)
+# Generates comprehensive coverage analysis with explanations
 
 set -euo pipefail
 
@@ -36,17 +37,18 @@ main() {
     local total=$(( $overall_covered + $overall_missed ))
 
     {
-        echo "# 📊 JaCoCo Coverage Analysis Report"
+        echo "# 📊 Code Coverage Analysis Report"
         echo ""
         echo "**Generated:** $(date -Iseconds)"
-        echo "**Coverage:** $overall_pct% ($overall_covered/$total lines)"
+        echo "**Overall Coverage:** $overall_pct% ($overall_covered/$total lines tested)"
+        echo ""
 
         if [ $overall_pct -ge 90 ]; then
-            echo "**Status:** 🟢 EXCELLENT (Production-ready)"
+            echo "**Status:** 🟢 EXCELLENT — Production-ready"
         elif [ $overall_pct -ge 80 ]; then
-            echo "**Status:** 🟡 GOOD (Needs improvement)"
+            echo "**Status:** 🟡 GOOD — Deploy with monitoring"
         else
-            echo "**Status:** 🔴 POOR (Below acceptable)"
+            echo "**Status:** 🔴 POOR — Requires improvement before production"
         fi
 
         echo ""
@@ -54,27 +56,48 @@ main() {
         echo ""
         echo "## Executive Summary"
         echo ""
-        echo "Your WAL implementation has **${overall_pct}% line coverage** with:"
-        echo "- **$overall_covered lines** tested and passing"
-        echo "- **$overall_missed lines** remaining untested"
+        echo "Code coverage measures what percentage of your source code is executed by tests."
+        echo "Higher coverage generally means lower risk of undetected bugs. This report shows"
+        echo "which components need more test coverage and prioritizes by risk."
+        echo ""
+        echo "### Coverage Breakdown"
+        echo "- **$overall_covered lines** are tested and verified to work"
+        echo "- **$overall_missed lines** have no test coverage — potential gap in reliability"
+        echo "- **${overall_pct}% coverage** means we have $overall_pct% confidence in tested behavior"
         echo ""
 
         if [ $overall_pct -ge 90 ]; then
-            echo "### ✅ Excellent Coverage"
-            echo "All critical paths are tested. System is production-ready."
+            echo "### ✅ What This Means"
+            echo "- Excellent coverage indicates mature, well-tested code"
+            echo "- Most execution paths are verified to work correctly"
+            echo "- Risk of undetected bugs is low"
+            echo "- System is suitable for production deployment"
+            echo "- Focus should be on maintaining current coverage level"
         elif [ $overall_pct -ge 80 ]; then
-            echo "### ⚠️ Needs Attention"
-            echo "Coverage is good but below 90% target. Address critical gaps below."
+            echo "### ⚠️ What This Means"
+            echo "- Good coverage, but some gaps exist ($((100 - overall_pct))% untested)"
+            echo "- Most common paths are tested, but edge cases may not be"
+            echo "- Some risk of undetected bugs in untested code"
+            echo "- Recommended: Address gaps before critical deployment"
+            echo "- Focus: Add tests for highest-risk components (see below)"
         else
-            echo "### ❌ Critical Gaps"
-            echo "Coverage is below acceptable threshold. Urgent action required."
+            echo "### 🔴 What This Means"
+            echo "- Significant gaps in test coverage ($((100 - overall_pct))% untested)"
+            echo "- Many execution paths are unverified"
+            echo "- High risk of undetected bugs"
+            echo "- Serious risk if deployed to production"
+            echo "- Urgent: Add tests for critical components before any deployment"
         fi
 
         echo ""
         echo "## Component-by-Component Analysis"
         echo ""
-        echo "| Component | Coverage | Lines | Risk | Action |"
-        echo "|-----------|----------|-------|------|--------|"
+        echo "Risk is calculated as: **missed_lines × criticality_score / 100**"
+        echo ""
+        echo "Higher risk score = more important to test (either many missed lines or critical component)"
+        echo ""
+        echo "| Component | Coverage | Lines | Risk | Why It Matters |"
+        echo "|-----------|----------|-------|------|----------------|"
 
         tmpfile=$(mktemp)
         while IFS=' ' read name covered missed; do
@@ -89,34 +112,79 @@ main() {
             icon="🟢"
             [ $pct -lt 90 ] && icon="🟡"
             [ $pct -lt 70 ] && icon="🔴"
-            action="Monitor"
-            [ $pct -lt 90 ] && action="Add $missed tests"
-            [ $pct -lt 70 ] && action="**Add $missed tests**"
 
-            echo "| $icon $name | $pct% | $covered/$((covered + missed)) | $risk | $action |"
+            why_matters="Utility"
+            [ "$name" = "SegmentMetadataRecovery" ] && why_matters="Critical for crash recovery"
+            [ "$name" = "SegmentReader" ] && why_matters="Data validation & correctness"
+            [ "$name" = "WriteAheadLog" ] && why_matters="Core API & concurrency"
+            [ "$name" = "FsyncExecutor" ] && why_matters="Durability guarantee"
+
+            echo "| $icon $name | $pct% | $covered/$((covered + missed)) | $risk | $why_matters |"
         done
 
         rm -f "$tmpfile"
 
         echo ""
-        echo "## Recommendations"
+        echo "## What Untested Code Means"
         echo ""
-        echo "### Coverage Targets"
-        echo "- 🟢 **90%+** = Production-ready"
-        echo "- 🟡 **80-89%** = Deploy with monitoring"
-        echo "- 🔴 **<80%** = Unacceptable risk"
+        echo "Each untested line represents a code path that has never been executed by tests."
+        echo "This creates risk in several areas:"
         echo ""
-        echo "### Next Steps"
+        echo "### Logic Errors"
+        echo "Code paths that are never executed can contain bugs that are never caught."
+        echo "Example: An error handling branch that's never tested may fail when actually needed."
+        echo ""
+        echo "### Edge Cases"
+        echo "Untested code often includes edge case handling (empty files, boundary conditions)."
+        echo "These are exactly where bugs hide (off-by-one errors, null pointer exceptions)."
+        echo ""
+        echo "### Integration Issues"
+        echo "Code might work in isolation but fail when integrated with other components."
+        echo "Only tests can verify integration works correctly."
+        echo ""
+        echo "### Maintenance Risk"
+        echo "When modifying untested code later, you can easily break it without knowing."
+        echo "Tests would catch this; untested code won't."
+        echo ""
+        echo "## Recommended Actions"
+        echo ""
+
         if [ $overall_pct -lt 90 ]; then
-            echo "1. Review component analysis above"
-            echo "2. Focus on highest-risk components (highest risk score)"
-            echo "3. Add tests for untested scenarios"
-            echo "4. Re-run \`mvn clean verify\` to verify improvements"
+            echo "### 1. Target High-Risk Components First"
+            echo "   Focus on components with:"
+            echo "   - High criticality (crash recovery, durability, core API)"
+            echo "   - Many missed lines (low coverage %)"
+            echo "   - Both"
+            echo ""
+            echo "### 2. Typical Untested Scenarios"
+            echo "   Add tests for:"
+            echo "   - **Error cases:** Disk full, I/O errors, permission denied"
+            echo "   - **Crash recovery:** What if power fails mid-operation?"
+            echo "   - **Edge cases:** Empty files, boundary conditions, max sizes"
+            echo "   - **Concurrency:** Multiple threads accessing simultaneously"
+            echo "   - **State transitions:** State machine edge cases"
+            echo ""
+            echo "### 3. Expected Impact"
+            echo "   Each untested line you add a test for:"
+            echo "   - Catches potential bugs early"
+            echo "   - Prevents regressions from future changes"
+            echo "   - Increases confidence in reliability"
+            echo "   - Reduces production incidents"
         else
-            echo "1. ✅ Maintain current coverage level"
-            echo "2. Ensure new code maintains 90%+"
-            echo "3. Continue monitoring for regressions"
+            echo "### Continue Strong"
+            echo "- Maintain 90%+ coverage going forward"
+            echo "- Add tests before implementing new features"
+            echo "- Monitor for coverage regressions in CI/CD"
         fi
+
+        echo ""
+        echo "## Coverage Targets"
+        echo ""
+        echo "| Threshold | Meaning | Action |"
+        echo "|-----------|---------|--------|"
+        echo "| 🟢 90%+ | Excellent | Production ready, maintain current level |"
+        echo "| 🟡 80-89% | Good | Deploy with monitoring, add tests for gaps |"
+        echo "| 🔴 <80% | Poor | Risky, add tests before deployment |"
 
     } > "$OUTPUT_PATH"
 
