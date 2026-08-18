@@ -2,11 +2,11 @@
 
 source scripts/report-utils.sh
 
-JACOCO_REPORT="target/site/jacoco/index.xml"
+JACOCO_REPORT="target/site/jacoco/jacoco.xml"
 OUTPUT_FILE="JACOCO_RESULTS.md"
 
 if ! file_exists "$JACOCO_REPORT"; then
-  log_warn "JaCoCo report not found"
+  log_warn "JaCoCo report not found at $JACOCO_REPORT"
   exit 0
 fi
 

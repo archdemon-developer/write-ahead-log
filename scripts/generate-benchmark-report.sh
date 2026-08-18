@@ -12,6 +12,7 @@ fi
 
 log_info "Generating benchmark report..."
 
+# Use jq to extract values from JSON array
 {
   cat << 'EOF'
 # Benchmark Report
@@ -24,7 +25,7 @@ append() queueing rate (ops/sec)
 
 EOF
 
-  grep "ProducerThroughputBenchmark.appendEntry" "$BENCHMARK_JSON" | grep -oE '[0-9]+\.[0-9]+' | head -1 | xargs -I {} echo "**{} ops/sec**"
+  jq -r '.[0] | select(.benchmark | contains("ProducerThroughputBenchmark")) | .primaryMetric.score' "$BENCHMARK_JSON" | xargs -I {} echo "**{} ops/sec**"
   echo ""
 
   cat << 'EOF'
@@ -34,7 +35,7 @@ Background writer thread processing rate (ops/sec)
 
 EOF
 
-  grep "WriterDrainRateBenchmark.appendAndFlush" "$BENCHMARK_JSON" | grep -oE '[0-9]+\.[0-9]+' | head -1 | xargs -I {} echo "**{} ops/sec**"
+  jq -r '.[1] | .primaryMetric.score' "$BENCHMARK_JSON" 2>/dev/null | xargs -I {} echo "**{} ops/sec**" || echo "**N/A**"
   echo ""
 
   cat << 'EOF'
@@ -46,61 +47,7 @@ writeBatch() blocking time distribution (microseconds)
 |-----------|-------------|
 EOF
 
-  p50=$(grep "DurabilityBarrierLatencyBenchmark.writeBatchLatency:p0.50" "$BENCHMARK_JSON" | grep -oE '[0-9]+\.[0-9]+' | head -1)
-  p95=$(grep "DurabilityBarrierLatencyBenchmark.writeBatchLatency:p0.95" "$BENCHMARK_JSON" | grep -oE '[0-9]+\.[0-9]+' | head -1)
-  p99=$(grep "DurabilityBarrierLatencyBenchmark.writeBatchLatency:p0.99" "$BENCHMARK_JSON" | grep -oE '[0-9]+\.[0-9]+' | head -1)
-  p999=$(grep "DurabilityBarrierLatencyBenchmark.writeBatchLatency:p0.999" "$BENCHMARK_JSON" | grep -oE '[0-9]+\.[0-9]+' | head -1)
-
-  echo "| p50 | $p50 |"
-  echo "| p95 | $p95 |"
-  echo "| p99 | $p99 |"
-  echo "| p999 | $p999 |"
-  echo ""
-
-  cat << 'EOF'
-## Angle 4: Queue Saturation
-
-Latency under concurrent load (microseconds average)
-
-| Threads | Latency (µs) |
-|---------|-------------|
-EOF
-
-  single=$(grep "QueueSaturationBenchmark.singleProducer" "$BENCHMARK_JSON" | grep -v "p0\." | grep -oE '[0-9]+\.[0-9]+' | head -1)
-  four=$(grep "QueueSaturationBenchmark.fourProducers" "$BENCHMARK_JSON" | grep -v "p0\." | grep -oE '[0-9]+\.[0-9]+' | head -1)
-  eight=$(grep "QueueSaturationBenchmark.eightProducers" "$BENCHMARK_JSON" | grep -v "p0\." | grep -oE '[0-9]+\.[0-9]+' | head -1)
-  sixteen=$(grep "QueueSaturationBenchmark.sixteenProducers" "$BENCHMARK_JSON" | grep -v "p0\." | grep -oE '[0-9]+\.[0-9]+' | head -1)
-
-  echo "| 1 | $single |"
-  echo "| 4 | $four |"
-  echo "| 8 | $eight |"
-  echo "| 16 | $sixteen |"
-  echo ""
-
-  cat << 'EOF'
-## Angle 5: Fsync Strategy Impact
-
-Latency comparison (microseconds)
-
-### FSYNC_EVERY_BATCH
-EOF
-
-  batch_avg=$(grep "FsyncStrategyImpactBenchmark" "$BENCHMARK_JSON" | grep "FSYNC_EVERY_BATCH" | grep -v "p0\." | grep -oE '[0-9]+\.[0-9]+' | head -1)
-  batch_p99=$(grep "FsyncStrategyImpactBenchmark.*FSYNC_EVERY_BATCH:p0.99" "$BENCHMARK_JSON" | grep -oE '[0-9]+\.[0-9]+' | head -1)
-
-  echo "Average: $batch_avg µs"
-  echo "p99: $batch_p99 µs"
-  echo ""
-
-  cat << 'EOF'
-### FSYNC_EVERY_ENTRY
-EOF
-
-  entry_avg=$(grep "FsyncStrategyImpactBenchmark" "$BENCHMARK_JSON" | grep "FSYNC_EVERY_ENTRY" | grep -v "p0\." | grep -oE '[0-9]+\.[0-9]+' | head -1)
-  entry_p99=$(grep "FsyncStrategyImpactBenchmark.*FSYNC_EVERY_ENTRY:p0.99" "$BENCHMARK_JSON" | grep -oE '[0-9]+\.[0-9]+' | head -1)
-
-  echo "Average: $entry_avg µs"
-  echo "p99: $entry_p99 µs"
+  jq -r '.[2] | .primaryMetric.scorePercentiles | "| p50 | \(.["50.0"]) |\n| p95 | \(.["95.0"]) |\n| p99 | \(.["99.0"]) |\n| p999 | \(.["99.9"]) |"' "$BENCHMARK_JSON" 2>/dev/null || echo "| - | - |"
   echo ""
 
 } > "$OUTPUT_FILE"
