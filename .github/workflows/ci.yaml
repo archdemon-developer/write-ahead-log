@@ -142,30 +142,27 @@ jobs:
     runs-on: ubuntu-latest
     needs: upload-artifacts
     if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download Artifacts
+      - name: Download All Artifacts
         uses: actions/download-artifact@v4
         with:
           path: release-artifacts
 
-      - name: Get Commit Info
-        id: commit
-        run: |
-          echo "short_sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
-          echo "timestamp=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_OUTPUT
-
-      - name: Create Release
-        uses: actions/create-release@v1
+      - name: Create Release with GitHub CLI
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: release-${{ steps.commit.outputs.short_sha }}
-          release_name: Release ${{ steps.commit.outputs.short_sha }}
-          body: |
-            Automated Release
-            Build Date: ${{ steps.commit.outputs.timestamp }}
-            Commit: ${{ steps.commit.outputs.short_sha }}
-          draft: false
-          prerelease: false
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          COMMIT_SHA=$(git rev-parse --short HEAD)
+          TIMESTAMP=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+          
+          gh release create release-${COMMIT_SHA} \
+            --title "Release ${COMMIT_SHA}" \
+            --notes "Build Date: ${TIMESTAMP}
+Commit: ${COMMIT_SHA}" \
+  release-artifacts/jacoco-xml/jacoco.xml \
+  release-artifacts/benchmark-json/benchmark-results.json \
+  release-artifacts/jar-file/*
