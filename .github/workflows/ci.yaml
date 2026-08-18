@@ -1,4 +1,4 @@
-name: CI/CD Pipeline
+name: Build & Test
 
 on:
   push:
@@ -7,232 +7,104 @@ on:
     branches: [ main, develop ]
 
 jobs:
-  stage-1-spotless:
-    name: Stage 1 - Code Formatting
+  spotless:
+    name: Code Format Check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with:
-          java-version: 21
+          java-version: '21'
           distribution: 'temurin'
           cache: maven
       - run: mvn spotless:check
 
-  stage-2-unit-tests:
-    name: Stage 2 - Unit Tests
+  unit-tests:
+    name: Unit Tests
     runs-on: ubuntu-latest
-    needs: stage-1-spotless
+    needs: spotless
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with:
-          java-version: 21
+          java-version: '21'
           distribution: 'temurin'
           cache: maven
-      - run: mvn clean test -Dtest='!*IntegrationTest,!*Benchmark*'
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: unit-test-results
-          path: target/surefire-reports/
+      - run: mvn test
 
-  stage-3-jacoco-verify:
-    name: Stage 3 - Code Coverage Verification
+  jacoco-verify:
+    name: JaCoCo Coverage Verify
     runs-on: ubuntu-latest
-    needs: stage-2-unit-tests
+    needs: unit-tests
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with:
-          java-version: 21
+          java-version: '21'
           distribution: 'temurin'
           cache: maven
-      - run: mvn clean verify -Dtest='!*IntegrationTest,!*Benchmark*'
-      - uses: actions/upload-artifact@v4
+      - run: mvn jacoco:report jacoco:check
+
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: jacoco-verify
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: maven
+      - run: mvn verify -Dgroups="integration"
+
+  benchmarks:
+    name: Benchmarks
+    runs-on: ubuntu-latest
+    needs: integration-tests
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: maven
+      - run: mvn verify -Dgroups="benchmark"
+
+  upload-artifacts:
+    name: Upload Artifacts
+    runs-on: ubuntu-latest
+    needs: benchmarks
+    if: always()
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: maven
+      - run: mvn clean verify
+
+      - name: Upload JaCoCo Report
         if: always()
+        uses: actions/upload-artifact@v4
         with:
           name: jacoco-report
           path: target/site/jacoco/
+          retention-days: 30
 
-  stage-4-integration-tests:
-    name: Stage 4 - Integration Tests
-    runs-on: ubuntu-latest
-    needs: stage-3-jacoco-verify
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with:
-          java-version: 21
-          distribution: 'temurin'
-          cache: maven
-      - run: mvn clean test -Dtest='*IntegrationTest'
-      - uses: actions/upload-artifact@v4
+      - name: Upload Benchmark Results
         if: always()
+        uses: actions/upload-artifact@v4
         with:
-          name: integration-test-results
-          path: target/surefire-reports/
-
-  stage-5-benchmarks:
-    name: Stage 5 - Performance Benchmarks
-    runs-on: ubuntu-latest
-    needs: stage-4-integration-tests
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with:
-          java-version: 21
-          distribution: 'temurin'
-          cache: maven
-      - run: mvn clean test -Dtest='BenchmarkRunnerTest'
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: benchmark-json
+          name: benchmark-results
           path: benchmark-results.json
+          retention-days: 30
 
-  stage-6-collate-artifacts:
-    name: Stage 6 - Generate Reports
-    runs-on: ubuntu-latest
-    needs: [ stage-3-jacoco-verify, stage-5-benchmarks ]
-    if: always()
-    steps:
-      - uses: actions/checkout@v4
-
-      # Download all artifacts
-      - uses: actions/download-artifact@v4
+      - name: Upload JAR
+        if: success()
+        uses: actions/upload-artifact@v4
         with:
-          name: jacoco-report
-          path: target/site/jacoco/
-        continue-on-error: true
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: benchmark-json
-          path: .
-        continue-on-error: true
-
-      # Verify artifacts are ready
-      - run: |
-          echo "=== Artifact Verification ==="
-          if [ -f "target/site/jacoco/jacoco.xml" ]; then
-            echo "✅ JaCoCo report ready"
-          else
-            echo "⚠️  JaCoCo report not found"
-          fi
-          if [ -f "benchmark-results.json" ]; then
-            echo "✅ Benchmark results ready"
-          else
-            echo "⚠️  Benchmark results not found"
-          fi
-
-      # Generate dynamic reports (pure Bash, no dependencies)
-      - run: |
-          chmod +x scripts/*.sh
-          mkdir -p reports
-          bash scripts/generate-reports.sh
-          echo "✅ All reports generated successfully"
-
-      # Upload all generated reports
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: reports
-          path: |
-            reports/
-            JACOCO_RESULTS.md
-            BENCHMARK_RESULTS.md
-            TEST_RESULTS.md
-          if-no-files-found: warn
-
-  stage-6-dynamic-analysis:
-    name: Stage 6b - Dynamic Gap Analysis (Optional)
-    runs-on: ubuntu-latest
-    needs: [ stage-3-jacoco-verify, stage-5-benchmarks ]
-    if: always()
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-
-      # Download artifacts for dynamic analysis
-      - uses: actions/download-artifact@v4
-        with:
-          name: jacoco-report
-          path: target/site/jacoco/
-        continue-on-error: true
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: benchmark-json
-          path: .
-        continue-on-error: true
-
-      # Generate dynamic (gap-focused) reports
-      - run: |
-          chmod +x scripts/*.sh
-          bash scripts/generate-reports.sh
-          echo "✅ Dynamic gap analysis complete"
-
-      # Upload dynamic reports for developers
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: dynamic-reports
-          path: |
-            JACOCO_DYNAMIC.md
-            TEST_DYNAMIC.md
-            BENCHMARK_DYNAMIC.md
-          if-no-files-found: ignore
-
-  stage-7-publish:
-    name: Stage 7 - Publish Artifacts
-    runs-on: ubuntu-latest
-    needs: [ stage-6-collate-artifacts, stage-6-dynamic-analysis ]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    steps:
-      - uses: actions/checkout@v4
-
-      # Download formal reports
-      - uses: actions/download-artifact@v4
-        with:
-          name: reports
-          path: final-artifacts/
-        continue-on-error: true
-
-      # Download dynamic reports (if generated)
-      - uses: actions/download-artifact@v4
-        with:
-          name: dynamic-reports
-          path: final-artifacts/
-        continue-on-error: true
-
-      # Create release summary
-      - run: |
-          echo "=== Release Artifacts Ready ===" > final-artifacts/README.md
-          echo "" >> final-artifacts/README.md
-          echo "**Generated:** $(date -Iseconds)" >> final-artifacts/README.md
-          echo "" >> final-artifacts/README.md
-          echo "## Contents" >> final-artifacts/README.md
-          echo "" >> final-artifacts/README.md
-          echo "### Formal Reports" >> final-artifacts/README.md
-          echo "- \`JACOCO_RESULTS.md\` — Code coverage analysis" >> final-artifacts/README.md
-          echo "- \`BENCHMARK_RESULTS.md\` — Performance metrics" >> final-artifacts/README.md
-          echo "- \`TEST_RESULTS.md\` — Test quality summary" >> final-artifacts/README.md
-          echo "- \`reports/index.html\` — Interactive HTML dashboard" >> final-artifacts/README.md
-          echo "" >> final-artifacts/README.md
-          echo "### Dynamic Analysis (Gap-Focused)" >> final-artifacts/README.md
-          echo "- \`JACOCO_DYNAMIC.md\` — Coverage gaps ranked by risk" >> final-artifacts/README.md
-          echo "- \`TEST_DYNAMIC.md\` — Test quality gaps" >> final-artifacts/README.md
-          echo "- \`BENCHMARK_DYNAMIC.md\` — Performance bottlenecks" >> final-artifacts/README.md
-          echo "" >> final-artifacts/README.md
-          echo "## View Reports" >> final-artifacts/README.md
-          echo "Open \`reports/index.html\` in a browser for interactive dashboard." >> final-artifacts/README.md
-          
-          echo "✅ Final artifacts ready for release:"
-          ls -la final-artifacts/
-
-      # Publish release artifacts
-      - uses: actions/upload-artifact@v4
-        with:
-          name: release-artifacts
-          path: final-artifacts/
+          name: wal-jar
+          path: target/*.jar
+          retention-days: 30
