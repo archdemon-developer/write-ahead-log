@@ -159,10 +159,11 @@ jobs:
           COMMIT_SHA=$(git rev-parse --short HEAD)
           TIMESTAMP=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
           
+          RELEASE_NOTES="Build Date: ${TIMESTAMP}"$'\n'"Commit: ${COMMIT_SHA}"
+          
           gh release create release-${COMMIT_SHA} \
             --title "Release ${COMMIT_SHA}" \
-            --notes "Build Date: ${TIMESTAMP}
-Commit: ${COMMIT_SHA}" \
-  release-artifacts/jacoco-xml/jacoco.xml \
-  release-artifacts/benchmark-json/benchmark-results.json \
-  release-artifacts/jar-file/*
+            --notes "${RELEASE_NOTES}" \
+            release-artifacts/jacoco-xml/jacoco.xml \
+            release-artifacts/benchmark-json/benchmark-results.json \
+            release-artifacts/jar-file/*
