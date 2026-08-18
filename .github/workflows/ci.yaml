@@ -170,7 +170,7 @@ jobs:
       # Generate dynamic (gap-focused) reports
       - run: |
           chmod +x scripts/*.sh
-          bash scripts/generate-dynamic-reports.sh
+          bash scripts/generate-reports.sh
           echo "✅ Dynamic gap analysis complete"
 
       # Upload dynamic reports for developers
