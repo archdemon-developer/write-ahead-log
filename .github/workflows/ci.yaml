@@ -136,3 +136,36 @@ jobs:
           name: wal-jar
           path: artifacts/jar/
           retention-days: 30
+
+  create-release:
+    name: 6. Create Release
+    runs-on: ubuntu-latest
+    needs: upload-artifacts
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+
+      - name: Get Commit Info
+        id: commit
+        run: |
+          echo "short_sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+          echo "timestamp=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: release-${{ steps.commit.outputs.short_sha }}
+          release_name: Release ${{ steps.commit.outputs.short_sha }}
+          body: |
+            Automated Release
+            Build Date: ${{ steps.commit.outputs.timestamp }}
+            Commit: ${{ steps.commit.outputs.short_sha }}
+          draft: false
+          prerelease: false
