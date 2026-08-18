@@ -98,6 +98,7 @@ jobs:
     if: always()
     steps:
       - uses: actions/checkout@v4
+      - run: apt-get update && apt-get install -y jq bc
       - uses: actions/download-artifact@v4
         with:
           name: jacoco-report
@@ -108,14 +109,9 @@ jobs:
           name: benchmark-json
         continue-on-error: true
       - run: |
-          echo "=== DEBUG: Files present ==="
-          find . -name "*.json" -o -name "*.xml" | head -20
-          echo ""
-          echo "=== DEBUG: benchmark-results.json ==="
-          [ -f benchmark-results.json ] && head -50 benchmark-results.json || echo "NOT FOUND"
-          echo ""
-          echo "=== DEBUG: JaCoCo report ==="
-          [ -f target/site/jacoco/index.xml ] && head -50 target/site/jacoco/index.xml || echo "NOT FOUND"
+          echo "=== Files present ==="
+          find . -name "jacoco.xml" -o -name "benchmark-results.json"
+          ls -la target/site/jacoco/ 2>/dev/null || echo "target/site/jacoco/ missing"
       - run: |
           chmod +x scripts/*.sh
           mkdir -p reports
