@@ -108,6 +108,15 @@ jobs:
           name: benchmark-json
         continue-on-error: true
       - run: |
+          echo "=== DEBUG: Files present ==="
+          find . -name "*.json" -o -name "*.xml" | head -20
+          echo ""
+          echo "=== DEBUG: benchmark-results.json ==="
+          [ -f benchmark-results.json ] && head -50 benchmark-results.json || echo "NOT FOUND"
+          echo ""
+          echo "=== DEBUG: JaCoCo report ==="
+          [ -f target/site/jacoco/index.xml ] && head -50 target/site/jacoco/index.xml || echo "NOT FOUND"
+      - run: |
           chmod +x scripts/*.sh
           mkdir -p reports
           ./scripts/generate-reports.sh
