@@ -1,100 +1,126 @@
 #!/bin/bash
 
-source scripts/report-utils.sh
+# Generates JACOCO_RESULTS.md with data-driven analysis
 
-JACOCO_REPORT="target/site/jacoco/jacoco.xml"
-OUTPUT_FILE="JACOCO_RESULTS.md"
+set -euo pipefail
 
-log_info "=== JACOCO REPORT GENERATION START ==="
-log_info "JACOCO_REPORT=$JACOCO_REPORT"
-log_info "OUTPUT_FILE=$OUTPUT_FILE"
-log_info "Current directory: $(pwd)"
+XML_PATH="${1:-target/site/jacoco/jacoco.xml}"
+OUTPUT_PATH="${2:-JACOCO_RESULTS.md}"
 
-log_info "=== Checking file existence ==="
-if ! file_exists "$JACOCO_REPORT"; then
-  log_error "JaCoCo report not found at $JACOCO_REPORT"
-  exit 1
-fi
+declare -A CRITICALITY=(
+    [WriteAheadLog]=95 [SegmentWriter]=90 [SegmentReader]=95
+    [SegmentMetadataRecovery]=100 [SegmentStoreManager]=85 [FsyncExecutor]=90
+    [EveryEntryFsyncExecutor]=85 [EveryBatchFsyncExecutor]=85
+)
 
-log_success "JaCoCo file found"
+calc_pct() {
+    [ $((  $1 + $2)) -eq 0 ] && echo 0 || echo $(( ($1 * 100) / ($1 + $2) ))
+}
 
-log_info "=== Reading file size ==="
-wc -l "$JACOCO_REPORT"
-file "$JACOCO_REPORT"
+extract_classes() {
+    sed -E 's/<sourcefile/\n<sourcefile/g' "$XML_PATH" | grep "<sourcefile" | while read line; do
+        name=$(echo "$line" | sed 's/.*name="\([^"]*\)\.java".*/\1/')
+        covered=$(echo "$line" | grep -oP 'covered="\K[0-9]+' | head -1)
+        missed=$(echo "$line" | grep -oP 'missed="\K[0-9]+' | head -1)
+        [ -n "$covered" ] && [ -n "$missed" ] && [ $(( $covered + $missed )) -gt 0 ] && \
+            echo "$name $covered $missed"
+    done
+}
 
-log_info "=== Extracting coverage values ==="
+main() {
+    [ ! -f "$XML_PATH" ] && { echo "[ERROR] $XML_PATH not found" >&2; exit 1; }
 
-# Extract OVERALL coverage (first counter with type LINE at report level)
-# The root <report> element has a <counter> with type="LINE"
-log_info 'Running: grep -oP "covered=\"\\K[0-9]+" "$JACOCO_REPORT" | head -1'
-overall=$(grep -oP 'covered="\K[0-9]+' "$JACOCO_REPORT" | head -1)
+    local overall_covered=$(grep -oP 'type="LINE".*?covered="\K[0-9]+' "$XML_PATH" | head -1)
+    local overall_missed=$(grep -oP 'type="LINE".*?missed="\K[0-9]+' "$XML_PATH" | head -1)
+    local overall_pct=$(calc_pct "$overall_covered" "$overall_missed")
+    local total=$(( $overall_covered + $overall_missed ))
 
-log_info "overall=$overall"
+    {
+        echo "# 📊 JaCoCo Coverage Analysis Report"
+        echo ""
+        echo "**Generated:** $(date -Iseconds)"
+        echo "**Coverage:** $overall_pct% ($overall_covered/$total lines)"
 
-log_info 'Running: grep -oP "missed=\"\\K[0-9]+" "$JACOCO_REPORT" | head -1'
-missed=$(grep -oP 'missed="\K[0-9]+' "$JACOCO_REPORT" | head -1)
+        if [ $overall_pct -ge 90 ]; then
+            echo "**Status:** 🟢 EXCELLENT (Production-ready)"
+        elif [ $overall_pct -ge 80 ]; then
+            echo "**Status:** 🟡 GOOD (Needs improvement)"
+        else
+            echo "**Status:** 🔴 POOR (Below acceptable)"
+        fi
 
-log_info "missed=$missed"
+        echo ""
+        echo "---"
+        echo ""
+        echo "## Executive Summary"
+        echo ""
+        echo "Your WAL implementation has **${overall_pct}% line coverage** with:"
+        echo "- **$overall_covered lines** tested and passing"
+        echo "- **$overall_missed lines** remaining untested"
+        echo ""
 
-if [ -z "$overall" ] || [ -z "$missed" ]; then
-  log_error "Failed to extract coverage values"
-  log_info "First 100 lines of file:"
-  head -100 "$JACOCO_REPORT"
-  exit 1
-fi
+        if [ $overall_pct -ge 90 ]; then
+            echo "### ✅ Excellent Coverage"
+            echo "All critical paths are tested. System is production-ready."
+        elif [ $overall_pct -ge 80 ]; then
+            echo "### ⚠️ Needs Attention"
+            echo "Coverage is good but below 90% target. Address critical gaps below."
+        else
+            echo "### ❌ Critical Gaps"
+            echo "Coverage is below acceptable threshold. Urgent action required."
+        fi
 
-log_success "Extracted overall=$overall, missed=$missed"
+        echo ""
+        echo "## Component-by-Component Analysis"
+        echo ""
+        echo "| Component | Coverage | Lines | Risk | Action |"
+        echo "|-----------|----------|-------|------|--------|"
 
-# Calculate percentage
-total=$((overall + missed))
-if [ "$total" -gt 0 ]; then
-  percentage=$((overall * 100 / total))
-else
-  percentage=0
-fi
+        tmpfile=$(mktemp)
+        while IFS=' ' read name covered missed; do
+            pct=$(calc_pct "$covered" "$missed")
+            crit=${CRITICALITY[$name]:-30}
+            [ $crit -lt 15 ] && continue
+            risk=$(( ($missed * $crit) / 100 ))
+            echo "$risk|$name|$pct|$covered|$missed|$crit" >> "$tmpfile"
+        done < <(extract_classes)
 
-log_info "Calculated coverage: $percentage% ($overall covered, $missed missed)"
+        sort -t'|' -k1 -rn "$tmpfile" | while IFS='|' read risk name pct covered missed crit; do
+            icon="🟢"
+            [ $pct -lt 90 ] && icon="🟡"
+            [ $pct -lt 70 ] && icon="🔴"
+            action="Monitor"
+            [ $pct -lt 90 ] && action="Add $missed tests"
+            [ $pct -lt 70 ] && action="**Add $missed tests**"
 
-# Create markdown report
-cat > "$OUTPUT_FILE" << EOF
-# JaCoCo Code Coverage Report
+            echo "| $icon $name | $pct% | $covered/$((covered + missed)) | $risk | $action |"
+        done
 
-## Overall Coverage
+        rm -f "$tmpfile"
 
-| Metric | Value |
-|--------|-------|
-| **Coverage %** | $percentage% |
-| **Lines Covered** | $overall |
-| **Lines Missed** | $missed |
-| **Total Lines** | $total |
+        echo ""
+        echo "## Recommendations"
+        echo ""
+        echo "### Coverage Targets"
+        echo "- 🟢 **90%+** = Production-ready"
+        echo "- 🟡 **80-89%** = Deploy with monitoring"
+        echo "- 🔴 **<80%** = Unacceptable risk"
+        echo ""
+        echo "### Next Steps"
+        if [ $overall_pct -lt 90 ]; then
+            echo "1. Review component analysis above"
+            echo "2. Focus on highest-risk components (highest risk score)"
+            echo "3. Add tests for untested scenarios"
+            echo "4. Re-run \`mvn clean verify\` to verify improvements"
+        else
+            echo "1. ✅ Maintain current coverage level"
+            echo "2. Ensure new code maintains 90%+"
+            echo "3. Continue monitoring for regressions"
+        fi
 
-## Package-Level Coverage
+    } > "$OUTPUT_PATH"
 
-EOF
+    echo "[SUCCESS] JaCoCo report: $OUTPUT_PATH"
+}
 
-# Extract package-level coverage
-log_info "Extracting package-level coverage..."
-grep -E '<package name=' "$JACOCO_REPORT" | while IFS= read -r line; do
-  # Extract package name
-  pkgname=$(echo "$line" | grep -oP 'name="\K[^"]+')
-
-  # Get the counter for this package (first counter element following the package)
-  counters=$(echo "$line" | grep -oP '<counter[^>]*>' | head -1)
-
-  if [ -n "$counters" ]; then
-    pkg_covered=$(echo "$counters" | grep -oP 'covered="\K[0-9]+')
-    pkg_missed=$(echo "$counters" | grep -oP 'missed="\K[0-9]+')
-
-    if [ -n "$pkg_covered" ] && [ -n "$pkg_missed" ]; then
-      pkg_total=$((pkg_covered + pkg_missed))
-      if [ "$pkg_total" -gt 0 ]; then
-        pkg_pct=$((pkg_covered * 100 / pkg_total))
-      else
-        pkg_pct=0
-      fi
-      echo "| $pkgname | $pkg_pct% | $pkg_covered | $pkg_missed |" >> "$OUTPUT_FILE"
-    fi
-  fi
-done
-
-log_success "JaCoCo report generated: $OUTPUT_FILE"
+main
