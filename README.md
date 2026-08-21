@@ -86,27 +86,27 @@ SegmentStoreManager (orchestrates rotation and durability)
 
 Disk Layout (.log segments)
     ┌─ Segment File ──────────────────────────────────────────────┐
-    │                                                              │
-    │ Header (48 bytes, CRC'd)                                     │
+    │                                                             │
+    │ Header (48 bytes, CRC'd)                                    │
     │   Magic: 0xAA                                               │
     │   Version: 1                                                │
     │   Sequence number                                           │
     │   Creation timestamp                                        │
     │   CRC32                                                     │
-    │                                                              │
-    │ Entries (variable length, each with CRC32)                 │
-    │   [Entry 1: length | type | payload | CRC32]              │
-    │   [Entry 2: length | type | payload | CRC32]              │
+    │                                                             │
+    │ Entries (variable length, each with CRC32)                  │
+    │   [Entry 1: length | type | payload | CRC32]                │
+    │   [Entry 2: length | type | payload | CRC32]                │
     │   ...                                                       │
-    │                                                              │
+    │                                                             │
     │ Footer (36 bytes, CRC'd)                                    │
-    │   Entry count                                              │
-    │   Min timestamp                                            │
-    │   Max timestamp                                            │
-    │   Complete marker (0xDEADBEEF)                            │
-    │   CRC32                                                    │
-    │                                                              │
-    └──────────────────────────────────────────────────────────────┘
+    │   Entry count                                               │
+    │   Min timestamp                                             │
+    │   Max timestamp                                             │
+    │   Complete marker (0xDEADBEEF)                              │
+    │   CRC32                                                     │
+    │                                                             │
+    └─────────────────────────────────────────────────────────────┘
 ```
 
 ### Concurrency Model
